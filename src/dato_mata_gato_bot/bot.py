@@ -108,6 +108,9 @@ async def cmd_nuevo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("Conversación reiniciada.")
 
 
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".bmp"}
+
+
 async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     if not _authorized(chat_id):
@@ -115,8 +118,21 @@ async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     doc = update.message.document
-    if not doc.file_name.endswith(".json"):
-        await update.message.reply_text("Eso no parece un guion.json (esperaba .json).")
+    suffix = Path(doc.file_name or "").suffix.lower()
+
+    if suffix in IMAGE_EXTENSIONS:
+        # Telegram manda las fotos "sin comprimir" (adjuntadas como
+        # archivo en vez de foto) como Document, no como PhotoSize --
+        # mismo tratamiento que on_photo, no rechazarlas.
+        tg_file = await doc.get_file()
+        await _handle_image(update, chat_id, tg_file, doc.file_unique_id, suffix)
+        return
+
+    if suffix != ".json":
+        await update.message.reply_text(
+            f"Recibí un archivo ({doc.file_name}) que no reconozco — esperaba "
+            f".json (guion) o una imagen ({', '.join(sorted(IMAGE_EXTENSIONS))})."
+        )
         return
 
     caption = (update.message.caption or "").strip()
@@ -141,6 +157,12 @@ async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await _reject_unauthorized(update)
         return
 
+    photo = update.message.photo[-1]  # la de mayor resolución
+    tg_file = await photo.get_file()
+    await _handle_image(update, chat_id, tg_file, photo.file_unique_id, ".jpg")
+
+
+async def _handle_image(update: Update, chat_id: int, tg_file, unique_id: str, suffix: str) -> None:
     slug = sessions.get_slug(chat_id)
     if not slug:
         await update.message.reply_text(
@@ -151,11 +173,10 @@ async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     caption = (update.message.caption or "").strip()
     staging = sessions.staging_dir_for(chat_id)
-    photo = update.message.photo[-1]  # la de mayor resolución
-    tg_file = await photo.get_file()
-    dest_path = staging / f"{photo.file_unique_id}.jpg"
+    dest_path = staging / f"{unique_id}{suffix}"
     await tg_file.download_to_drive(custom_path=str(dest_path))
 
+    await update.message.reply_text(f"Imagen recibida y guardada en {dest_path}.")
     await _dispatch_to_claude(
         update, INSTRUCCION_IMAGEN.format(path=dest_path, caption=caption or "(sin texto)", slug=slug)
     )
