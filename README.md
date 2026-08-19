@@ -7,22 +7,31 @@ memoria real, como en una sesión interactiva.
 
 ## Cómo funciona
 
-1. Mandas un `guion.json` (como documento) al bot, con el slug en el texto
-   del mensaje o en el nombre del archivo.
-2. El bot lo guarda en `C:\Android_in\<slug>\guion.json` y dispara una
-   sesión de Claude Code (`claude -p ... --session-id ...`) desde
-   `C:\illustrated-narrator` — esa sesión ya conoce el pipeline completo
-   porque está documentado en su `CLAUDE.md`.
-3. Cada mensaje siguiente en ese chat usa `--resume` sobre la misma sesión:
-   puedes pedir ajustes, ver progreso, mandar fotos, todo en la misma
-   conversación.
-4. Fotos: mándalas con esta convención en el texto/caption —
+El bot separa **recolectar archivos** (puro manejo de archivos, sin
+Claude) de **generar** (el único momento en que se invoca a Claude):
+
+1. `/nuevovideo [slug]` — empieza un capítulo. Sin `slug`, se deriva del
+   `guion.json` que mandes después.
+2. Mandas el `guion.json` (como documento) — el bot lo guarda en
+   `C:\Android_in\<slug>\guion.json`. Sin invocar a Claude todavía.
+3. (Opcional) Mandas fotos con este texto/caption:
    `p1 [inicio] [1]` (número de plano, posición legible, índice de toma).
-   Claude las coloca como override manual siguiendo las reglas ya
-   documentadas en `illustrated-narrator/CLAUDE.md`.
-5. El video final **no se manda por Telegram** (pesa ~200MB+, por encima
-   del límite de 50MB para bots) — llega a `C:\Android_out` como siempre,
-   y de ahí a tu celular vía Syncthing. El bot solo avisa por texto.
+   El bot las guarda en `C:\Android_in\<slug>\imagenes_manuales\`, ya
+   parseadas — tampoco invoca a Claude.
+4. `/generar` — ahora sí dispara UNA sesión de Claude Code
+   (`claude -p ... --session-id/--resume`) desde `C:\illustrated-narrator`,
+   que ya conoce el pipeline completo (documentado en su `CLAUDE.md`):
+   genera el audio con `tts-kokoro`, arma el video con
+   `illustrated-narrator`, coloca las imágenes manuales, revisa
+   coherencia de medios, y copia el resultado a `Android_out`.
+5. `/estatus` — si hay una generación corriendo y desde cuándo.
+6. Después de generar, los mensajes de texto libres siguen la misma
+   conversación (`--resume`) para pedir ajustes — memoria real, como una
+   sesión interactiva. `/nuevo` la reinicia desde cero.
+
+El video final **no se manda por Telegram** (pesa ~200MB+, por encima
+del límite de 50MB para bots) — llega a `C:\Android_out` como siempre, y
+de ahí a tu celular vía Syncthing. El bot solo avisa por texto.
 
 ## Instalación
 
