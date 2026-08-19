@@ -40,6 +40,10 @@ def run_turn(session_id: str, message: str, is_new_session: bool) -> ClaudeTurnR
         proc = subprocess.run(
             args, cwd=CWD, capture_output=True, text=True, encoding="utf-8",
             timeout=SUBPROCESS_TIMEOUT_SECONDS,
+            # claude.exe es una app de consola; sin esto, al lanzarla desde
+            # pythonw.exe (sin consola) Windows le abre una ventana visible
+            # que el usuario puede cerrar por error y matar la generación.
+            creationflags=subprocess.CREATE_NO_WINDOW,
         )
     except subprocess.TimeoutExpired:
         return ClaudeTurnResult(ok=False, text="Se agotó el tiempo de espera (60 min).", raw="")
