@@ -1,10 +1,23 @@
 """Bot de Telegram que puentea la conversación a una sesión de Claude Code
-por chat, para dirigir el pipeline de Dato Mata Gato desde el celular."""
+por chat, para dirigir el pipeline de Dato Mata Gato desde el celular.
+
+Flujo por comandos (no todo dispara a Claude):
+  /nuevovideo [slug]  -> modo recolección: guarda guion.json e imágenes
+                         SIN invocar a Claude, es solo mover archivos.
+  /generar            -> el único disparo real a Claude: corre el
+                         pipeline completo con todo lo ya recolectado.
+  /estatus             -> si hay una generación en curso y desde cuándo.
+  /nuevo               -> reinicia la conversación con Claude desde cero.
+Los mensajes de texto libres sí siguen la conversación con Claude
+(para pedir ajustes después de generar), salvo que haya una generación
+en curso.
+"""
 
 import asyncio
 import logging
 import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -18,7 +31,7 @@ from telegram.ext import (
     filters,
 )
 
-from dato_mata_gato_bot import sessions
+from dato_mata_gato_bot import image_naming, sessions
 from dato_mata_gato_bot.claude_runner import run_turn
 from dato_mata_gato_bot.logging_config import setup_logging
 
@@ -28,19 +41,17 @@ logger = logging.getLogger(__name__)
 
 ANDROID_IN = Path(r"C:\Android_in")
 TELEGRAM_MSG_LIMIT = 4000
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".bmp"}
 
-INSTRUCCION_GUION = (
-    "Se subió un guion.json nuevo para el proyecto '{slug}' en "
-    r"C:\Android_in\{slug}\guion.json"
-    ". Generá el audio (tts-kokoro, voz pm_santa, velocidad 1.15) y el video "
-    "completo siguiendo el pipeline documentado en CLAUDE.md, revisando "
-    "coherencia de país en los medios reales antes de darlo por terminado. "
-    "Avisame cuando esté listo en Android_out, o si algo falla."
-)
-
-INSTRUCCION_IMAGEN = (
-    "Imagen recibida, guardada en {path}. Instrucción del usuario: {caption}\n"
-    "Proyecto actual: {slug}"
+INSTRUCCION_GENERAR = (
+    "Generá el video completo para el proyecto '{slug}':\n"
+    r"- guion.json en C:\Android_in\{slug}\guion.json" "\n"
+    r"- imágenes manuales pre-cargadas (si existen) en C:\Android_in\{slug}\imagenes_manuales\, "
+    "con nombres <plano>_<posicion>_<indice>.<ext> -- colocalas como elegido_<indice>.* "
+    "en el plano correspondiente ANTES de correr narrator generate, siguiendo CLAUDE.md.\n"
+    "Seguí el pipeline completo documentado en CLAUDE.md (tts-kokoro voz pm_santa a 1.15x, "
+    "illustrated-narrator, revisión de coherencia de país en medios reales) TODO EN FOREGROUND. "
+    "Avisame cuando el video esté en Android_out, o si algo falló."
 )
 
 
@@ -61,8 +72,7 @@ def _authorized(chat_id: int) -> bool:
 async def _reject_unauthorized(update: Update) -> None:
     chat_id = update.effective_chat.id
     await update.message.reply_text(
-        f"Este chat no está autorizado todavía.\n\n"
-        f"Tu chat_id es: `{chat_id}`\n\n"
+        f"Este chat no está autorizado todavía.\n\nTu chat_id es: `{chat_id}`\n\n"
         f"Agrégalo a TELEGRAM_ALLOWED_CHAT_IDS en el .env del bot y reinícialo.",
         parse_mode=ParseMode.MARKDOWN,
     )
@@ -78,24 +88,98 @@ async def _send_long(update: Update, text: str) -> None:
 async def _dispatch_to_claude(update: Update, message: str) -> None:
     chat_id = update.effective_chat.id
     session_id, is_new = sessions.ensure_session_id(chat_id)
-    await update.message.reply_text(
-        "Recibido, trabajando en esto — puede tardar varios minutos si involucra "
-        "generar audio/video. Aviso cuando termine."
-    )
-    result = await asyncio.to_thread(run_turn, session_id, message, is_new)
-    await _send_long(update, result.text)
+    sessions.set_generating(chat_id, True)
+    try:
+        result = await asyncio.to_thread(run_turn, session_id, message, is_new)
+        await _send_long(update, result.text)
+    finally:
+        sessions.set_generating(chat_id, False)
+
+
+def _slugify(text: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_-]", "_", text.strip())
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _authorized(update.effective_chat.id):
+        await _reject_unauthorized(update)
+        return
+    await update.message.reply_text(
+        "Comandos:\n"
+        "/nuevovideo [slug] — empieza un capítulo nuevo (mándame guion.json e imágenes después)\n"
+        "/generar — corre el pipeline completo con lo que ya te mandé\n"
+        "/estatus — si hay algo corriendo ahora\n"
+        "/nuevo — reinicia la conversación con Claude desde cero\n\n"
+        "Las imágenes van con este formato en el texto/caption: p1 [inicio] [1]"
+    )
+
+
+async def cmd_nuevovideo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     if not _authorized(chat_id):
         await _reject_unauthorized(update)
         return
+
+    slug = _slugify(" ".join(context.args)) if context.args else None
+    sessions.start_collection(chat_id, slug)
+
+    if slug:
+        (ANDROID_IN / slug).mkdir(parents=True, exist_ok=True)
+        await update.message.reply_text(
+            f"Listo, proyecto '{slug}'. Mándame el guion.json de este capítulo."
+        )
+    else:
+        await update.message.reply_text(
+            "Listo, capítulo nuevo. Mándame el guion.json (el slug sale del "
+            "nombre del archivo o del texto que le pongas)."
+        )
+
+
+async def cmd_generar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    if not _authorized(chat_id):
+        await _reject_unauthorized(update)
+        return
+
+    slug = sessions.get_slug(chat_id)
+    if not slug:
+        await update.message.reply_text("No sé de qué proyecto — usa /nuevovideo primero.")
+        return
+
+    guion_path = ANDROID_IN / slug / "guion.json"
+    if not guion_path.exists():
+        await update.message.reply_text(f"Todavía no tengo el guion.json de '{slug}'.")
+        return
+
+    running, since = sessions.get_generating(chat_id)
+    if running:
+        await update.message.reply_text(f"Ya hay una generación corriendo desde {since}.")
+        return
+
     await update.message.reply_text(
-        "Listo. Mándame un guion.json (como documento, con el slug en el "
-        "texto o en el nombre del archivo) para generar un video nuevo, "
-        "o escríbeme directo para seguir la conversación sobre el proyecto "
-        "actual. /nuevo empieza una conversación desde cero."
+        f"Arrancando el pipeline completo para '{slug}' — puede tardar varios minutos. "
+        f"Aviso cuando termine."
+    )
+    await _dispatch_to_claude(update, INSTRUCCION_GENERAR.format(slug=slug))
+    sessions.set_phase(chat_id, sessions.PHASE_IDLE)
+
+
+async def cmd_estatus(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    if not _authorized(chat_id):
+        await _reject_unauthorized(update)
+        return
+
+    slug = sessions.get_slug(chat_id) or "(ninguno)"
+    running, since = sessions.get_generating(chat_id)
+    if not running:
+        await update.message.reply_text(f"Nada corriendo ahora. Proyecto actual: {slug}")
+        return
+
+    started = datetime.fromisoformat(since)
+    elapsed_min = int((datetime.now(timezone.utc) - started).total_seconds() // 60)
+    await update.message.reply_text(
+        f"Generando '{slug}' desde hace {elapsed_min} min. Te aviso cuando termine."
     )
 
 
@@ -105,10 +189,7 @@ async def cmd_nuevo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await _reject_unauthorized(update)
         return
     sessions.reset_session(chat_id)
-    await update.message.reply_text("Conversación reiniciada.")
-
-
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".bmp"}
+    await update.message.reply_text("Conversación con Claude reiniciada.")
 
 
 async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -121,11 +202,8 @@ async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     suffix = Path(doc.file_name or "").suffix.lower()
 
     if suffix in IMAGE_EXTENSIONS:
-        # Telegram manda las fotos "sin comprimir" (adjuntadas como
-        # archivo en vez de foto) como Document, no como PhotoSize --
-        # mismo tratamiento que on_photo, no rechazarlas.
         tg_file = await doc.get_file()
-        await _handle_image(update, chat_id, tg_file, doc.file_unique_id, suffix)
+        await _handle_image(update, chat_id, tg_file, suffix)
         return
 
     if suffix != ".json":
@@ -135,9 +213,10 @@ async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )
         return
 
-    caption = (update.message.caption or "").strip()
-    slug = caption or Path(doc.file_name).stem
-    slug = re.sub(r"[^a-zA-Z0-9_-]", "_", slug)
+    slug = sessions.get_slug(chat_id)
+    if not slug:
+        caption = (update.message.caption or "").strip()
+        slug = _slugify(caption or Path(doc.file_name).stem)
 
     dest_dir = ANDROID_IN / slug
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -147,8 +226,10 @@ async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await tg_file.download_to_drive(custom_path=str(dest_path))
 
     sessions.set_slug(chat_id, slug)
-    await update.message.reply_text(f"Guardado en {dest_path}. Slug: {slug}")
-    await _dispatch_to_claude(update, INSTRUCCION_GUION.format(slug=slug))
+    await update.message.reply_text(
+        f"Guion recibido para '{slug}'. Mándame imágenes si quieres "
+        f"(p1 [inicio] [1]), o escribe /generar cuando estés listo."
+    )
 
 
 async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -156,29 +237,38 @@ async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _authorized(chat_id):
         await _reject_unauthorized(update)
         return
-
     photo = update.message.photo[-1]  # la de mayor resolución
     tg_file = await photo.get_file()
-    await _handle_image(update, chat_id, tg_file, photo.file_unique_id, ".jpg")
+    await _handle_image(update, chat_id, tg_file, ".jpg")
 
 
-async def _handle_image(update: Update, chat_id: int, tg_file, unique_id: str, suffix: str) -> None:
+async def _handle_image(update: Update, chat_id: int, tg_file, suffix: str) -> None:
+    """Guarda la imagen directo en Android_in/<slug>/imagenes_manuales/ —
+    NO invoca a Claude. Eso pasa recien con /generar."""
     slug = sessions.get_slug(chat_id)
     if not slug:
         await update.message.reply_text(
-            "Todavía no sé de qué proyecto es esta imagen — mándame primero "
-            "el guion.json de ese capítulo."
+            "Todavía no sé de qué proyecto es esta imagen — usa /nuevovideo y "
+            "mándame el guion.json primero."
         )
         return
 
     caption = (update.message.caption or "").strip()
-    staging = sessions.staging_dir_for(chat_id)
-    dest_path = staging / f"{unique_id}{suffix}"
+    spec = image_naming.parse(caption)
+    if spec is None:
+        await update.message.reply_text(
+            "No reconocí el formato del texto de esta imagen. Mándala de nuevo "
+            "con un texto así: p1 [inicio] [1]  (número de plano, posición, índice)."
+        )
+        return
+
+    dest_dir = sessions.manual_images_dir_for(slug)
+    dest_path = dest_dir / image_naming.filename_for(spec, suffix)
     await tg_file.download_to_drive(custom_path=str(dest_path))
 
-    await update.message.reply_text(f"Imagen recibida y guardada en {dest_path}.")
-    await _dispatch_to_claude(
-        update, INSTRUCCION_IMAGEN.format(path=dest_path, caption=caption or "(sin texto)", slug=slug)
+    await update.message.reply_text(
+        f"Guardada: plano {spec.plano_id}, posición {spec.posicion}, toma {spec.indice}. "
+        f"({dest_path})"
     )
 
 
@@ -187,6 +277,12 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _authorized(chat_id):
         await _reject_unauthorized(update)
         return
+
+    running, since = sessions.get_generating(chat_id)
+    if running:
+        await update.message.reply_text(f"Sigo trabajando en la generación (desde {since}).")
+        return
+
     await _dispatch_to_claude(update, update.message.text)
 
 
@@ -205,6 +301,9 @@ def main() -> None:
 
     app = Application.builder().token(token).build()
     app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("nuevovideo", cmd_nuevovideo))
+    app.add_handler(CommandHandler("generar", cmd_generar))
+    app.add_handler(CommandHandler("estatus", cmd_estatus))
     app.add_handler(CommandHandler("nuevo", cmd_nuevo))
     app.add_handler(MessageHandler(filters.Document.ALL, on_document))
     app.add_handler(MessageHandler(filters.PHOTO, on_photo))
