@@ -1,33 +1,37 @@
 # dato-mata-gato-bot
 
-Puente entre Telegram y Claude Code para dirigir el pipeline de **Dato Mata
-Gato** (`tts-kokoro` + `illustrated-narrator`) desde el celular. Cada chat
-de Telegram se mapea 1:1 a una sesión de Claude Code — la conversación tiene
-memoria real, como en una sesión interactiva.
+Puente entre Telegram y el pipeline de **Dato Mata Gato** (`tts-kokoro` +
+`illustrated-narrator`) desde el celular. `/generar` corre todo por
+código, determinístico — Claude Code solo entra si algo queda ambiguo
+después de reintentos automáticos.
 
 ## Cómo funciona
 
-El bot separa **recolectar archivos** (puro manejo de archivos, sin
-Claude) de **generar** (el único momento en que se invoca a Claude):
+El bot separa **recolectar archivos** (puro manejo de archivos) de
+**generar** (pipeline determinístico primero, Claude solo si hace falta):
 
 1. `/nuevovideo [slug]` — empieza un capítulo. Sin `slug`, se deriva del
    `guion.json` que mandes después.
 2. Mandas el `guion.json` (como documento) — el bot lo guarda en
-   `C:\Android_in\<slug>\guion.json`. Sin invocar a Claude todavía.
+   `C:\Android_in\<slug>\guion.json`.
 3. (Opcional) Mandas fotos con este texto/caption:
    `p1 [inicio] [1]` (número de plano, posición legible, índice de toma).
    El bot las guarda en `C:\Android_in\<slug>\imagenes_manuales\`, ya
-   parseadas — tampoco invoca a Claude.
-4. `/generar` — ahora sí dispara UNA sesión de Claude Code
-   (`claude -p ... --session-id/--resume`) desde `C:\illustrated-narrator`,
-   que ya conoce el pipeline completo (documentado en su `CLAUDE.md`):
-   genera el audio con `tts-kokoro`, arma el video con
-   `illustrated-narrator`, coloca las imágenes manuales, revisa
-   coherencia de medios, y copia el resultado a `Android_out`.
-5. `/estatus` — si hay una generación corriendo y desde cuándo.
-6. Después de generar, los mensajes de texto libres siguen la misma
-   conversación (`--resume`) para pedir ajustes — memoria real, como una
-   sesión interactiva. `/nuevo` la reinicia desde cero.
+   parseadas. `/logo` para el logo del canal (fijo, se usa siempre en el
+   plano 0). `/voz [nombre]` para elegir la voz (default `am_adam`).
+4. `/generar` — corre `pipeline.py` (audio con tts-kokoro, armado del
+   proyecto, `narrator generate`, y `media_check.py` revisando el
+   `manifest.json` contra una lista de países/ciudades ya vistos como
+   falsos positivos). Si algo queda marcado tras 2 reintentos
+   automáticos, **recién ahí** se dispara una sesión de Claude Code
+   (`claude -p ... --session-id/--resume`) con el detalle exacto de lo
+   pendiente, para que investigue/decida lo que el código no puede.
+5. `/estatus` — el paso real en el que va (generando audio, armando
+   proyecto, reintento N/M, copiando a Android_out), no solo tiempo
+   transcurrido.
+6. Los mensajes de texto libres sí siguen la conversación con Claude
+   (`--resume`, memoria real) para pedir ajustes después de generar.
+   `/nuevo` la reinicia desde cero.
 
 El video final **no se manda por Telegram** (pesa ~200MB+, por encima
 del límite de 50MB para bots) — llega a `C:\Android_out` como siempre, y
