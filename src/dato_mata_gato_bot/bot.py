@@ -43,13 +43,21 @@ ANDROID_IN = Path(r"C:\Android_in")
 TELEGRAM_MSG_LIMIT = 4000
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".bmp"}
 
+# Catalogo de voces ya exploradas/probadas (ver tts-kokoro/projects/voces_exploracion).
+VOICES = (
+    "am_adam", "am_santa", "am_onyx", "am_michael", "am_fenrir",
+    "bm_george", "pm_santa", "pm_alex", "em_santa", "em_alex", "ef_dora",
+)
+
 INSTRUCCION_GENERAR = (
     "Generá el video completo para el proyecto '{slug}':\n"
     r"- guion.json en C:\Android_in\{slug}\guion.json" "\n"
     r"- imágenes manuales pre-cargadas (si existen) en C:\Android_in\{slug}\imagenes_manuales\, "
     "con nombres <plano>_<posicion>_<indice>.<ext> -- colocalas como elegido_<indice>.* "
     "en el plano correspondiente ANTES de correr narrator generate, siguiendo CLAUDE.md.\n"
-    "Seguí el pipeline completo documentado en CLAUDE.md (tts-kokoro voz pm_santa a 1.15x, "
+    "- Logo del canal (si existe en C:\\illustrated-narrator\\assets\\): usarlo siempre "
+    "como visual del plano p00, siguiendo la regla de CLAUDE.md.\n"
+    "Seguí el pipeline completo documentado en CLAUDE.md (tts-kokoro voz {voz} a 1.15x, "
     "illustrated-narrator, revisión de coherencia de país en medios reales) TODO EN FOREGROUND. "
     "Avisame cuando el video esté en Android_out, o si algo falló."
 )
@@ -109,6 +117,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/nuevovideo [slug] — empieza un capítulo nuevo (mándame guion.json e imágenes después)\n"
         "/generar — corre el pipeline completo con lo que ya te mandé\n"
         "/estatus — si hay algo corriendo ahora\n"
+        "/voz [nombre] — ver o elegir la voz (por defecto am_adam)\n"
+        "/logo — mandar/actualizar el logo del canal (se usa siempre en el plano 0)\n"
         "/nuevo — reinicia la conversación con Claude desde cero\n\n"
         "Las imágenes van con este formato en el texto/caption: p1 [inicio] [1]"
     )
@@ -156,12 +166,53 @@ async def cmd_generar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text(f"Ya hay una generación corriendo desde {since}.")
         return
 
+    voz = sessions.get_voice(chat_id)
     await update.message.reply_text(
-        f"Arrancando el pipeline completo para '{slug}' — puede tardar varios minutos. "
-        f"Aviso cuando termine."
+        f"Arrancando el pipeline completo para '{slug}' con voz '{voz}' — puede tardar "
+        f"varios minutos. Aviso cuando termine."
     )
-    await _dispatch_to_claude(update, INSTRUCCION_GENERAR.format(slug=slug))
+    await _dispatch_to_claude(update, INSTRUCCION_GENERAR.format(slug=slug, voz=voz))
     sessions.set_phase(chat_id, sessions.PHASE_IDLE)
+
+
+async def cmd_voz(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    if not _authorized(chat_id):
+        await _reject_unauthorized(update)
+        return
+
+    if not context.args:
+        actual = sessions.get_voice(chat_id)
+        await update.message.reply_text(
+            f"Voz actual: {actual}\nDisponibles: {', '.join(VOICES)}\n"
+            f"Para cambiarla: /voz <nombre>"
+        )
+        return
+
+    voz = context.args[0].strip().lower()
+    if voz not in VOICES:
+        await update.message.reply_text(
+            f"No conozco esa voz. Disponibles: {', '.join(VOICES)}"
+        )
+        return
+
+    sessions.set_voice(chat_id, voz)
+    await update.message.reply_text(f"Listo, voz para el próximo /generar: {voz}")
+
+
+async def cmd_logo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    if not _authorized(chat_id):
+        await _reject_unauthorized(update)
+        return
+
+    actual = sessions.logo_path()
+    sessions.set_awaiting_logo(chat_id, True)
+    aviso_actual = f" (ya hay uno: {actual.name})" if actual else ""
+    await update.message.reply_text(
+        f"Mándame la imagen del logo del canal{aviso_actual} — se va a usar siempre "
+        f"en el plano 0 de todos los videos nuevos."
+    )
 
 
 async def cmd_estatus(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -245,6 +296,20 @@ async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def _handle_image(update: Update, chat_id: int, tg_file, suffix: str) -> None:
     """Guarda la imagen directo en Android_in/<slug>/imagenes_manuales/ —
     NO invoca a Claude. Eso pasa recien con /generar."""
+    if sessions.is_awaiting_logo(chat_id):
+        sessions.LOGO_DIR.mkdir(parents=True, exist_ok=True)
+        # Borra cualquier logo anterior con otra extension antes de guardar
+        # el nuevo, para que sessions.logo_path() no encuentre dos.
+        for old in sessions.LOGO_DIR.glob(f"{sessions.LOGO_STEM}.*"):
+            old.unlink()
+        dest_path = sessions.LOGO_DIR / f"{sessions.LOGO_STEM}{suffix}"
+        await tg_file.download_to_drive(custom_path=str(dest_path))
+        sessions.set_awaiting_logo(chat_id, False)
+        await update.message.reply_text(
+            f"Logo guardado en {dest_path}. Se va a usar en el plano 0 de ahora en adelante."
+        )
+        return
+
     slug = sessions.get_slug(chat_id)
     if not slug:
         await update.message.reply_text(
@@ -304,6 +369,8 @@ def main() -> None:
     app.add_handler(CommandHandler("nuevovideo", cmd_nuevovideo))
     app.add_handler(CommandHandler("generar", cmd_generar))
     app.add_handler(CommandHandler("estatus", cmd_estatus))
+    app.add_handler(CommandHandler("voz", cmd_voz))
+    app.add_handler(CommandHandler("logo", cmd_logo))
     app.add_handler(CommandHandler("nuevo", cmd_nuevo))
     app.add_handler(MessageHandler(filters.Document.ALL, on_document))
     app.add_handler(MessageHandler(filters.PHOTO, on_photo))

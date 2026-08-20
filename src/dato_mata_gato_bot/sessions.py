@@ -16,6 +16,10 @@ ANDROID_IN = Path(r"C:\Android_in")
 PHASE_IDLE = "idle"
 PHASE_COLLECTING = "recolectando"
 
+DEFAULT_VOICE = "am_adam"
+LOGO_DIR = Path(r"C:\illustrated-narrator\assets")
+LOGO_STEM = "dato_mata_gato_logo"
+
 
 def _load() -> dict[str, Any]:
     if not SESSIONS_PATH.exists():
@@ -100,6 +104,33 @@ def staging_dir_for(chat_id: int) -> Path:
     d = STAGING_DIR / str(chat_id)
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def set_voice(chat_id: int, voice: str) -> None:
+    _update(chat_id, voice=voice)
+
+
+def get_voice(chat_id: int) -> str:
+    return get_chat_state(chat_id).get("voice") or DEFAULT_VOICE
+
+
+def set_awaiting_logo(chat_id: int, waiting: bool) -> None:
+    _update(chat_id, awaiting_logo=waiting)
+
+
+def is_awaiting_logo(chat_id: int) -> bool:
+    return bool(get_chat_state(chat_id).get("awaiting_logo"))
+
+
+def logo_path() -> Path | None:
+    """Ruta del logo del canal si ya se subió alguno con /logo (cualquier
+    extensión de imagen). Es global, no por chat -- un solo logo para
+    toda la serie."""
+    if not LOGO_DIR.exists():
+        return None
+    for p in LOGO_DIR.glob(f"{LOGO_STEM}.*"):
+        return p
+    return None
 
 
 def manual_images_dir_for(slug: str) -> Path:

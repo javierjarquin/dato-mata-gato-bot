@@ -40,3 +40,34 @@ def test_staging_dir_for_crea_carpeta_por_chat(tmp_path, monkeypatch):
     d = sessions.staging_dir_for(789)
     assert d.exists()
     assert d.name == "789"
+
+
+def test_get_voice_default_am_adam(tmp_path, monkeypatch):
+    monkeypatch.setattr(sessions, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(sessions, "SESSIONS_PATH", tmp_path / "sessions.json")
+
+    assert sessions.get_voice(111) == "am_adam"
+    sessions.set_voice(111, "pm_santa")
+    assert sessions.get_voice(111) == "pm_santa"
+
+
+def test_awaiting_logo_flag(tmp_path, monkeypatch):
+    monkeypatch.setattr(sessions, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(sessions, "SESSIONS_PATH", tmp_path / "sessions.json")
+
+    assert sessions.is_awaiting_logo(222) is False
+    sessions.set_awaiting_logo(222, True)
+    assert sessions.is_awaiting_logo(222) is True
+    sessions.set_awaiting_logo(222, False)
+    assert sessions.is_awaiting_logo(222) is False
+
+
+def test_logo_path_encuentra_cualquier_extension(tmp_path, monkeypatch):
+    monkeypatch.setattr(sessions, "LOGO_DIR", tmp_path / "assets")
+    assert sessions.logo_path() is None
+
+    sessions.LOGO_DIR.mkdir(parents=True)
+    logo_file = sessions.LOGO_DIR / f"{sessions.LOGO_STEM}.png"
+    logo_file.write_bytes(b"fake-png")
+
+    assert sessions.logo_path() == logo_file
