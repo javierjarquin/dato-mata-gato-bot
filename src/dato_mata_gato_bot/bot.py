@@ -31,7 +31,7 @@ from telegram.ext import (
     filters,
 )
 
-from dato_mata_gato_bot import image_naming, pipeline, sessions
+from dato_mata_gato_bot import image_naming, pipeline, sessions, summary
 from dato_mata_gato_bot.claude_runner import run_turn
 from dato_mata_gato_bot.logging_config import setup_logging
 
@@ -114,6 +114,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/nuevovideo [slug] — empieza un capítulo nuevo (mándame guion.json e imágenes después)\n"
         "/generar — corre el pipeline completo con lo que ya te mandé\n"
         "/estatus — si hay algo corriendo ahora\n"
+        "/resumen — narración y estado de medios de cada plano\n"
         "/voz [nombre] — ver o elegir la voz (por defecto am_adam)\n"
         "/logo — mandar/actualizar el logo del canal (se usa siempre en el plano 0)\n"
         "/nuevo — reinicia la conversación con Claude desde cero\n\n"
@@ -191,6 +192,21 @@ async def cmd_generar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     )
     await _dispatch_to_claude(update, INSTRUCCION_ESCALAR.format(slug=slug, detalle=result.mensaje))
     sessions.set_phase(chat_id, sessions.PHASE_IDLE)
+
+
+async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    if not _authorized(chat_id):
+        await _reject_unauthorized(update)
+        return
+
+    slug = sessions.get_slug(chat_id)
+    if not slug:
+        await update.message.reply_text("No sé de qué proyecto — usa /nuevovideo primero.")
+        return
+
+    texto = summary.build_summary(slug)
+    await _send_long(update, texto)
 
 
 async def cmd_voz(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -388,6 +404,7 @@ def main() -> None:
     app.add_handler(CommandHandler("nuevovideo", cmd_nuevovideo))
     app.add_handler(CommandHandler("generar", cmd_generar))
     app.add_handler(CommandHandler("estatus", cmd_estatus))
+    app.add_handler(CommandHandler("resumen", cmd_resumen))
     app.add_handler(CommandHandler("voz", cmd_voz))
     app.add_handler(CommandHandler("logo", cmd_logo))
     app.add_handler(CommandHandler("nuevo", cmd_nuevo))
