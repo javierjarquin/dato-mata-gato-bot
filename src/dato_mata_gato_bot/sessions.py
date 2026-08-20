@@ -100,6 +100,17 @@ def get_generating(chat_id: int) -> tuple[bool, str | None]:
     return bool(state.get("generating")), state.get("generating_since")
 
 
+def set_progress(chat_id: int, paso: str) -> None:
+    """Paso actual del pipeline (ej. 'generando audio', 'narrator generate
+    intento 2/3') -- para que /estatus diga algo mas util que 'sigue
+    corriendo'."""
+    _update(chat_id, progress=paso)
+
+
+def get_progress(chat_id: int) -> str | None:
+    return get_chat_state(chat_id).get("progress")
+
+
 def staging_dir_for(chat_id: int) -> Path:
     d = STAGING_DIR / str(chat_id)
     d.mkdir(parents=True, exist_ok=True)

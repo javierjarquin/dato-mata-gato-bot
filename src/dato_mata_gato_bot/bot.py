@@ -31,7 +31,7 @@ from telegram.ext import (
     filters,
 )
 
-from dato_mata_gato_bot import image_naming, sessions
+from dato_mata_gato_bot import image_naming, pipeline, sessions
 from dato_mata_gato_bot.claude_runner import run_turn
 from dato_mata_gato_bot.logging_config import setup_logging
 
@@ -49,17 +49,14 @@ VOICES = (
     "bm_george", "pm_santa", "pm_alex", "em_santa", "em_alex", "ef_dora",
 )
 
-INSTRUCCION_GENERAR = (
-    "Generá el video completo para el proyecto '{slug}':\n"
-    r"- guion.json en C:\Android_in\{slug}\guion.json" "\n"
-    r"- imágenes manuales pre-cargadas (si existen) en C:\Android_in\{slug}\imagenes_manuales\, "
-    "con nombres <plano>_<posicion>_<indice>.<ext> -- colocalas como elegido_<indice>.* "
-    "en el plano correspondiente ANTES de correr narrator generate, siguiendo CLAUDE.md.\n"
-    "- Logo del canal (si existe en C:\\illustrated-narrator\\assets\\): usarlo siempre "
-    "como visual del plano p00, siguiendo la regla de CLAUDE.md.\n"
-    "Seguí el pipeline completo documentado en CLAUDE.md (tts-kokoro voz {voz} a 1.15x, "
-    "illustrated-narrator, revisión de coherencia de país en medios reales) TODO EN FOREGROUND. "
-    "Avisame cuando el video esté en Android_out, o si algo falló."
+INSTRUCCION_ESCALAR = (
+    "El pipeline automático (sin Claude) ya corrió para '{slug}' -- audio generado, "
+    "proyecto armado en illustrated-narrator, y al menos una pasada de narrator generate "
+    "con reintentos ya agotados. Esto quedó sin resolver:\n\n{detalle}\n\n"
+    "Resolvelo vos siguiendo CLAUDE.md (investigar/ajustar busqueda_medios, o ficha de "
+    "texto si no hay foto real, etc.), corré narrator generate las veces que haga falta "
+    "TODO EN FOREGROUND, y copiá el resultado final a Android_out vos mismo. Avisame "
+    "cuando esté listo, o si algo no se puede resolver."
 )
 
 
@@ -168,10 +165,31 @@ async def cmd_generar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     voz = sessions.get_voice(chat_id)
     await update.message.reply_text(
-        f"Arrancando el pipeline completo para '{slug}' con voz '{voz}' — puede tardar "
-        f"varios minutos. Aviso cuando termine."
+        f"Arrancando el pipeline para '{slug}' con voz '{voz}' — primero sin Claude "
+        f"(más rápido y sin costo). Puede tardar varios minutos. /estatus para ver el paso."
     )
-    await _dispatch_to_claude(update, INSTRUCCION_GENERAR.format(slug=slug, voz=voz))
+
+    sessions.set_generating(chat_id, True)
+    try:
+        result = await asyncio.to_thread(pipeline.run, slug, voz, chat_id)
+    finally:
+        sessions.set_generating(chat_id, False)
+        sessions.set_progress(chat_id, None)
+
+    if result.ok:
+        await update.message.reply_text(result.mensaje)
+        sessions.set_phase(chat_id, sessions.PHASE_IDLE)
+        return
+
+    if not result.necesita_claude:
+        await update.message.reply_text(f"Falló: {result.mensaje}")
+        return
+
+    await update.message.reply_text(
+        f"El pipeline automático no pudo terminar solo:\n{result.mensaje}\n\n"
+        f"Paso esto a Claude para que lo investigue y resuelva..."
+    )
+    await _dispatch_to_claude(update, INSTRUCCION_ESCALAR.format(slug=slug, detalle=result.mensaje))
     sessions.set_phase(chat_id, sessions.PHASE_IDLE)
 
 
@@ -229,8 +247,9 @@ async def cmd_estatus(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     started = datetime.fromisoformat(since)
     elapsed_min = int((datetime.now(timezone.utc) - started).total_seconds() // 60)
+    paso = sessions.get_progress(chat_id) or "arrancando"
     await update.message.reply_text(
-        f"Generando '{slug}' desde hace {elapsed_min} min. Te aviso cuando termine."
+        f"Generando '{slug}' desde hace {elapsed_min} min.\nPaso actual: {paso}"
     )
 
 
