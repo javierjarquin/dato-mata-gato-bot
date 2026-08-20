@@ -31,7 +31,7 @@ from telegram.ext import (
     filters,
 )
 
-from dato_mata_gato_bot import image_naming, pipeline, sessions, summary
+from dato_mata_gato_bot import image_naming, pipeline, sessions, summary, wiki_images
 from dato_mata_gato_bot.claude_runner import run_turn
 from dato_mata_gato_bot.logging_config import setup_logging
 
@@ -115,6 +115,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/generar — corre el pipeline completo con lo que ya te mandé\n"
         "/estatus — si hay algo corriendo ahora\n"
         "/resumen — narración y estado de medios de cada plano\n"
+        "/investigar <url wikipedia> — busca imágenes con licencia libre en ese "
+        "artículo y te las manda para elegir (no afecta a /generar si falla)\n"
         "/voz [nombre] — ver o elegir la voz (por defecto am_adam)\n"
         "/logo — mandar/actualizar el logo del canal (se usa siempre en el plano 0)\n"
         "/nuevo — reinicia la conversación con Claude desde cero\n\n"
@@ -192,6 +194,50 @@ async def cmd_generar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     )
     await _dispatch_to_claude(update, INSTRUCCION_ESCALAR.format(slug=slug, detalle=result.mensaje))
     sessions.set_phase(chat_id, sessions.PHASE_IDLE)
+
+
+async def cmd_investigar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Herramienta de investigación manual, aparte del pipeline: busca
+    imágenes de contenido con licencia libre en un artículo de Wikipedia
+    y las manda para que el usuario elija cuál usar. Si falla, no afecta
+    a /generar ni a nada más del bot -- solo avisa."""
+    chat_id = update.effective_chat.id
+    if not _authorized(chat_id):
+        await _reject_unauthorized(update)
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "Uso: /investigar <url de Wikipedia>\n"
+            "Te mando las imágenes con licencia libre que encuentre ahí. Para usar "
+            "alguna en un plano, reenviámela con el texto p1 [inicio] [1]."
+        )
+        return
+
+    url = context.args[0]
+    await update.message.reply_text("Buscando imágenes con licencia libre en ese artículo...")
+
+    try:
+        imagenes = await asyncio.to_thread(wiki_images.fetch_content_images, url)
+    except Exception as exc:
+        logger.warning("investigar falló para %s: %s", url, exc)
+        await update.message.reply_text(
+            f"No pude investigar esa URL ({exc}). No afecta al resto del bot — /generar sigue normal."
+        )
+        return
+
+    if not imagenes:
+        await update.message.reply_text("No encontré imágenes de contenido con licencia libre en ese artículo.")
+        return
+
+    await update.message.reply_text(f"Encontré {len(imagenes)} imagen(es):")
+    for img in imagenes:
+        caption = f"{img.archivo}\nLicencia: {img.licencia or '(sin dato)'}\nAutor: {img.autor or '(sin dato)'}"
+        try:
+            await update.message.reply_photo(photo=img.url, caption=caption[:1024])
+        except Exception as exc:
+            logger.warning("No pude mandar %s: %s", img.url, exc)
+            await update.message.reply_text(f"No pude mandar {img.archivo} ({exc}).")
 
 
 async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -405,6 +451,7 @@ def main() -> None:
     app.add_handler(CommandHandler("generar", cmd_generar))
     app.add_handler(CommandHandler("estatus", cmd_estatus))
     app.add_handler(CommandHandler("resumen", cmd_resumen))
+    app.add_handler(CommandHandler("investigar", cmd_investigar))
     app.add_handler(CommandHandler("voz", cmd_voz))
     app.add_handler(CommandHandler("logo", cmd_logo))
     app.add_handler(CommandHandler("nuevo", cmd_nuevo))
