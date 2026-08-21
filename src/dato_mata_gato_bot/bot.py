@@ -31,7 +31,7 @@ from telegram.ext import (
     filters,
 )
 
-from dato_mata_gato_bot import image_naming, pipeline, sessions, summary, wiki_images
+from dato_mata_gato_bot import generated_videos, image_naming, pipeline, sessions, summary, wiki_images
 from dato_mata_gato_bot.claude_runner import run_turn
 from dato_mata_gato_bot.logging_config import setup_logging
 
@@ -127,6 +127,10 @@ HELP_TEXT = """Comandos disponibles — flujo típico: /nuevovideo → mandar gu
   Ejemplo: /resumen
   Requiere: proyecto actual con guion.json ya recibido.
 
+/videos
+  Lista todos los videos ya generados en Android_out (nombre, tamaño, fecha).
+  Ejemplo: /videos
+
 /voz [nombre]
   Sin argumento: muestra la voz actual y la lista completa.
   Con argumento: la cambia para el próximo /generar.
@@ -167,6 +171,7 @@ BOT_COMMANDS = [
     ("generar", "Correr el pipeline completo del proyecto actual"),
     ("estatus", "Ver si hay algo corriendo y en qué paso va"),
     ("resumen", "Narración y estado de medios de cada plano"),
+    ("videos", "Listar los videos ya generados en Android_out"),
     ("voz", "Ver o elegir la voz [nombre opcional]"),
     ("logo", "Mandar/actualizar el logo del canal"),
     ("investigar", "Buscar imágenes libres en un artículo de Wikipedia"),
@@ -303,6 +308,14 @@ async def cmd_investigar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         except Exception as exc:
             logger.warning("No pude mandar %s: %s", img.url, exc)
             await update.message.reply_text(f"No pude mandar {img.archivo} ({exc}).")
+
+
+async def cmd_videos(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _authorized(update.effective_chat.id):
+        await _reject_unauthorized(update)
+        return
+    videos = generated_videos.list_generated_videos()
+    await _send_long(update, generated_videos.format_video_list(videos))
 
 
 async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -520,6 +533,7 @@ def main() -> None:
     app.add_handler(CommandHandler("generar", cmd_generar))
     app.add_handler(CommandHandler("estatus", cmd_estatus))
     app.add_handler(CommandHandler("resumen", cmd_resumen))
+    app.add_handler(CommandHandler("videos", cmd_videos))
     app.add_handler(CommandHandler("investigar", cmd_investigar))
     app.add_handler(CommandHandler("voz", cmd_voz))
     app.add_handler(CommandHandler("logo", cmd_logo))
