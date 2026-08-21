@@ -8,6 +8,5 @@ dist/
 venv/
 
 .env
-data/sessions.json
-data/staging/
+data/
 *.log
