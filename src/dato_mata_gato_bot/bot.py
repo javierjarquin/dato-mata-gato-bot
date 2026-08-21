@@ -105,23 +105,88 @@ def _slugify(text: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]", "_", text.strip())
 
 
+HELP_TEXT = """Comandos disponibles — flujo típico: /nuevovideo → mandar guion.json → (opcional: fotos/logo/voz) → /generar
+
+/nuevovideo [slug]
+  Empieza un capítulo nuevo. Sin slug, se deriva del nombre del archivo que mandes después.
+  Ejemplo: /nuevovideo elchalequero
+  Después: mandale el guion.json como documento adjunto (no como texto pegado).
+
+/generar
+  Corre el pipeline completo (audio + video) para el proyecto actual. Primero intenta
+  todo por código; si algo queda ambiguo, recién ahí pide ayuda a Claude.
+  Ejemplo: /generar
+  Requiere: haber mandado guion.json antes con /nuevovideo.
+
+/estatus
+  Dice si hay algo corriendo ahora y en qué paso va (audio, armado, reintento N, etc.).
+  Ejemplo: /estatus
+
+/resumen
+  Lista cada plano del guion actual: sección, duración, narración y estado de medios.
+  Ejemplo: /resumen
+  Requiere: proyecto actual con guion.json ya recibido.
+
+/voz [nombre]
+  Sin argumento: muestra la voz actual y la lista completa.
+  Con argumento: la cambia para el próximo /generar.
+  Ejemplo: /voz am_onyx
+  Opciones: am_adam (default), am_santa, am_onyx, am_michael, am_fenrir, bm_george,
+  pm_santa, pm_alex, em_santa, em_alex, ef_dora
+
+/logo
+  Prepara el bot para recibir el logo del canal — el siguiente mensaje debe ser la
+  imagen (adjunta, no un link). Se usa siempre en el plano 0 de todos los videos.
+  Ejemplo: /logo, después adjuntar la foto del logo.
+
+/investigar <url>
+  Busca imágenes con licencia libre en un artículo de Wikipedia y te las manda una
+  por una (con licencia y autor) para que elijas. Independiente de /generar — si
+  falla, solo avisa, no bloquea nada.
+  Ejemplo: /investigar https://es.wikipedia.org/wiki/Criptografía
+  Requiere: URL completa que empiece con https://xx.wikipedia.org/wiki/...
+
+/nuevo
+  Reinicia la conversación con Claude desde cero (borra la memoria del chat, no tus
+  archivos ni proyectos).
+  Ejemplo: /nuevo
+
+Enviar una imagen para un plano específico:
+  Adjuntá la foto (botón de clip, no como texto) con este texto/caption:
+  p1 [inicio] [1]
+  p1 = número de plano · [inicio|medio|fin] = posición (informativo) · [N] = índice de toma
+
+/ayuda o /help — vuelve a mostrar este mensaje."""
+
+
+# Para el menú nativo de Telegram (botón "/" con autocompletado). Telegram
+# limita la descripción a un renglón corto -- el detalle completo con
+# ejemplos vive en HELP_TEXT (/ayuda).
+BOT_COMMANDS = [
+    ("nuevovideo", "Empezar un capítulo nuevo [slug opcional]"),
+    ("generar", "Correr el pipeline completo del proyecto actual"),
+    ("estatus", "Ver si hay algo corriendo y en qué paso va"),
+    ("resumen", "Narración y estado de medios de cada plano"),
+    ("voz", "Ver o elegir la voz [nombre opcional]"),
+    ("logo", "Mandar/actualizar el logo del canal"),
+    ("investigar", "Buscar imágenes libres en un artículo de Wikipedia"),
+    ("nuevo", "Reiniciar la conversación con Claude"),
+    ("ayuda", "Ver todos los comandos con ejemplos"),
+]
+
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _authorized(update.effective_chat.id):
         await _reject_unauthorized(update)
         return
-    await update.message.reply_text(
-        "Comandos:\n"
-        "/nuevovideo [slug] — empieza un capítulo nuevo (mándame guion.json e imágenes después)\n"
-        "/generar — corre el pipeline completo con lo que ya te mandé\n"
-        "/estatus — si hay algo corriendo ahora\n"
-        "/resumen — narración y estado de medios de cada plano\n"
-        "/investigar <url wikipedia> — busca imágenes con licencia libre en ese "
-        "artículo y te las manda para elegir (no afecta a /generar si falla)\n"
-        "/voz [nombre] — ver o elegir la voz (por defecto am_adam)\n"
-        "/logo — mandar/actualizar el logo del canal (se usa siempre en el plano 0)\n"
-        "/nuevo — reinicia la conversación con Claude desde cero\n\n"
-        "Las imágenes van con este formato en el texto/caption: p1 [inicio] [1]"
-    )
+    await _send_long(update, HELP_TEXT)
+
+
+async def cmd_ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _authorized(update.effective_chat.id):
+        await _reject_unauthorized(update)
+        return
+    await _send_long(update, HELP_TEXT)
 
 
 async def cmd_nuevovideo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -445,8 +510,12 @@ def main() -> None:
             "(seguro por defecto). Escríbele al bot para que te diga tu chat_id."
         )
 
-    app = Application.builder().token(token).build()
+    async def _post_init(app: Application) -> None:
+        await app.bot.set_my_commands(BOT_COMMANDS)
+
+    app = Application.builder().token(token).post_init(_post_init).build()
     app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler(["ayuda", "help"], cmd_ayuda))
     app.add_handler(CommandHandler("nuevovideo", cmd_nuevovideo))
     app.add_handler(CommandHandler("generar", cmd_generar))
     app.add_handler(CommandHandler("estatus", cmd_estatus))
