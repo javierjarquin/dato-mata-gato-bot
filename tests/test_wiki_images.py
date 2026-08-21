@@ -54,3 +54,16 @@ def test_descarta_no_commons_si_solo_libres(mock_get):
 
     resultado = wiki_images.fetch_content_images("https://es.wikipedia.org/wiki/Prueba", solo_libres=True)
     assert resultado == []
+
+
+@patch("dato_mata_gato_bot.wiki_images.requests.get")
+def test_find_article_url_devuelve_url_del_primer_resultado(mock_get):
+    mock_get.return_value = _resp({"query": {"search": [{"title": "Criptografía"}]}})
+    url = wiki_images.find_article_url("criptografia")
+    assert url == "https://es.wikipedia.org/wiki/Criptografía"
+
+
+@patch("dato_mata_gato_bot.wiki_images.requests.get")
+def test_find_article_url_sin_resultados_devuelve_none(mock_get):
+    mock_get.return_value = _resp({"query": {"search": []}})
+    assert wiki_images.find_article_url("asdkjhaskjdh") is None

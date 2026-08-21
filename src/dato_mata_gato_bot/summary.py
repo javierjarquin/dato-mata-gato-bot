@@ -20,6 +20,21 @@ def _find_guion(slug: str) -> Path | None:
     return None
 
 
+def load_guion_dict(slug: str) -> dict | None:
+    guion_path = _find_guion(slug)
+    if guion_path is None:
+        return None
+    return json.loads(guion_path.read_text(encoding="utf-8"))
+
+
+def find_plano(guion: dict, plano_id: str) -> dict | None:
+    plano_id = plano_id.lower()
+    for p in guion.get("planos", []):
+        if str(p.get("id", "")).lower() == plano_id:
+            return p
+    return None
+
+
 def _shot_status(manifest: dict, plano_id: str) -> str:
     shots = [k for k in manifest if k.startswith(f"{plano_id}_")]
     if not shots:

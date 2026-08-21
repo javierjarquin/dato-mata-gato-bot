@@ -31,7 +31,16 @@ from telegram.ext import (
     filters,
 )
 
-from dato_mata_gato_bot import generated_videos, image_naming, pipeline, sessions, summary, wiki_images
+from dato_mata_gato_bot import (
+    auto_query,
+    free_image_search,
+    generated_videos,
+    image_naming,
+    pipeline,
+    sessions,
+    summary,
+    wiki_images,
+)
 from dato_mata_gato_bot.claude_runner import run_turn
 from dato_mata_gato_bot.logging_config import setup_logging
 
@@ -143,12 +152,16 @@ HELP_TEXT = """Comandos disponibles — flujo típico: /nuevovideo → mandar gu
   imagen (adjunta, no un link). Se usa siempre en el plano 0 de todos los videos.
   Ejemplo: /logo, después adjuntar la foto del logo.
 
-/investigar <url>
-  Busca imágenes con licencia libre en un artículo de Wikipedia y te las manda una
-  por una (con licencia y autor) para que elijas. Independiente de /generar — si
-  falla, solo avisa, no bloquea nada.
-  Ejemplo: /investigar https://es.wikipedia.org/wiki/Criptografía
-  Requiere: URL completa que empiece con https://xx.wikipedia.org/wiki/...
+/investigar <url | id de plano | palabras clave>
+  Busca imágenes con licencia libre (Wikipedia + Openverse + NASA) y te las manda
+  una por una (con fuente, licencia y autor) para que elijas. Con un id de plano
+  (ej. p02), arma la búsqueda solo con el título del guion + nombres propios de esa
+  narración — no hace falta pasar una URL. Independiente de /generar — si falla,
+  solo avisa, no bloquea nada.
+  Ejemplos:
+    /investigar https://es.wikipedia.org/wiki/Criptografía
+    /investigar p02
+    /investigar Alan Turing máquina Enigma
 
 /nuevo
   Reinicia la conversación con Claude desde cero (borra la memoria del chat, no tus
@@ -174,7 +187,7 @@ BOT_COMMANDS = [
     ("videos", "Listar los videos ya generados en Android_out"),
     ("voz", "Ver o elegir la voz [nombre opcional]"),
     ("logo", "Mandar/actualizar el logo del canal"),
-    ("investigar", "Buscar imágenes libres en un artículo de Wikipedia"),
+    ("investigar", "Buscar imágenes libres [url, plano o palabras clave]"),
     ("nuevo", "Reiniciar la conversación con Claude"),
     ("ayuda", "Ver todos los comandos con ejemplos"),
 ]
@@ -268,7 +281,8 @@ async def cmd_generar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def cmd_investigar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Herramienta de investigación manual, aparte del pipeline: busca
-    imágenes de contenido con licencia libre en un artículo de Wikipedia
+    imágenes de contenido con licencia libre a partir de una URL de
+    Wikipedia, un plano del proyecto actual, o palabras clave sueltas --
     y las manda para que el usuario elija cuál usar. Si falla, no afecta
     a /generar ni a nada más del bot -- solo avisa."""
     chat_id = update.effective_chat.id
@@ -278,36 +292,65 @@ async def cmd_investigar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     if not context.args:
         await update.message.reply_text(
-            "Uso: /investigar <url de Wikipedia>\n"
-            "Te mando las imágenes con licencia libre que encuentre ahí. Para usar "
-            "alguna en un plano, reenviámela con el texto p1 [inicio] [1]."
+            "Uso:\n"
+            "/investigar <url de Wikipedia>\n"
+            "/investigar <id de plano, ej. p02> — arma la búsqueda solo con el "
+            "título del guion + nombres propios de la narración de ese plano\n"
+            "/investigar <palabras clave sueltas>\n\n"
+            "Busca en Wikipedia + Openverse + NASA (todas con licencia verificada). "
+            "Para usar una imagen en un plano, reenviámela con el texto p1 [inicio] [1]."
         )
         return
 
-    url = context.args[0]
-    await update.message.reply_text("Buscando imágenes con licencia libre en ese artículo...")
+    arg = " ".join(context.args)
+    es_url = arg.startswith("http")
+
+    if es_url:
+        buscar_por_query = False
+        query_o_url = arg
+    else:
+        slug = sessions.get_slug(chat_id)
+        plano = summary.find_plano(summary.load_guion_dict(slug), arg) if slug else None
+        if plano is not None:
+            guion = summary.load_guion_dict(slug)
+            query_o_url = auto_query.build_query(guion.get("titulo", ""), plano.get("narracion", ""))
+            if not query_o_url:
+                await update.message.reply_text(
+                    f"No pude sacar palabras clave del plano '{arg}' (narración vacía o "
+                    f"sin nombres propios) — probá con /investigar <palabras clave>."
+                )
+                return
+            await update.message.reply_text(f"Plano {arg} → busco: \"{query_o_url}\"")
+        else:
+            query_o_url = arg
+        buscar_por_query = True
+
+    await update.message.reply_text("Buscando imágenes con licencia libre...")
 
     try:
-        imagenes = await asyncio.to_thread(wiki_images.fetch_content_images, url)
+        if buscar_por_query:
+            imagenes = await asyncio.to_thread(free_image_search.search_all, query_o_url)
+        else:
+            imagenes = await asyncio.to_thread(free_image_search.search_wikipedia_url, query_o_url)
     except Exception as exc:
-        logger.warning("investigar falló para %s: %s", url, exc)
+        logger.warning("investigar falló para %r: %s", query_o_url, exc)
         await update.message.reply_text(
-            f"No pude investigar esa URL ({exc}). No afecta al resto del bot — /generar sigue normal."
+            f"No pude investigar eso ({exc}). No afecta al resto del bot — /generar sigue normal."
         )
         return
 
     if not imagenes:
-        await update.message.reply_text("No encontré imágenes de contenido con licencia libre en ese artículo.")
+        await update.message.reply_text("No encontré imágenes con licencia libre para eso.")
         return
 
     await update.message.reply_text(f"Encontré {len(imagenes)} imagen(es):")
     for img in imagenes:
-        caption = f"{img.archivo}\nLicencia: {img.licencia or '(sin dato)'}\nAutor: {img.autor or '(sin dato)'}"
+        caption = f"{img.titulo}\nFuente: {img.fuente}\nLicencia: {img.licencia or '(sin dato)'}\nAutor: {img.autor or '(sin dato)'}"
         try:
             await update.message.reply_photo(photo=img.url, caption=caption[:1024])
         except Exception as exc:
             logger.warning("No pude mandar %s: %s", img.url, exc)
-            await update.message.reply_text(f"No pude mandar {img.archivo} ({exc}).")
+            await update.message.reply_text(f"No pude mandar {img.titulo} ({exc}).")
 
 
 async def cmd_videos(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

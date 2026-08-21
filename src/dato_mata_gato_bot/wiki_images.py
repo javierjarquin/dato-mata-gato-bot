@@ -39,10 +39,29 @@ class WikiImage:
     commons: bool
 
 
+WIKI_API_ES = "https://es.wikipedia.org/w/api.php"
+
+
 def _api_wiki(url: str) -> tuple[str, str]:
     p = urlparse(url)
     titulo = unquote(p.path.split("/wiki/", 1)[-1])
     return f"{p.scheme}://{p.netloc}/w/api.php", titulo
+
+
+def find_article_url(query: str, api: str = WIKI_API_ES) -> str | None:
+    """Busca por palabras clave y devuelve la URL del artículo más
+    relevante, o None si no hay resultados."""
+    r = requests.get(api, timeout=TIMEOUT, headers={"User-Agent": UA}, params={
+        "action": "query", "list": "search", "srsearch": query,
+        "srlimit": 1, "format": "json",
+    })
+    r.raise_for_status()
+    resultados = r.json().get("query", {}).get("search", [])
+    if not resultados:
+        return None
+    titulo = resultados[0]["title"]
+    dominio = api.split("/w/api.php")[0]
+    return f"{dominio}/wiki/{titulo.replace(' ', '_')}"
 
 
 def fetch_content_images(wiki_url: str, solo_libres: bool = True) -> list[WikiImage]:

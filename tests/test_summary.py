@@ -56,3 +56,29 @@ def test_resumen_incluye_estado_de_medios_si_hay_manifest(tmp_path, monkeypatch)
 
     texto = summary.build_summary("caso2")
     assert "[medios: 1/2]" in texto
+
+
+def test_load_guion_dict_lee_y_find_plano_es_case_insensitive(tmp_path, monkeypatch):
+    android_in = tmp_path / "in"
+    monkeypatch.setattr(summary, "ANDROID_IN", android_in)
+    monkeypatch.setattr(summary, "NARRATOR_PROJECTS", tmp_path / "narrator")
+
+    slug_dir = android_in / "caso3"
+    slug_dir.mkdir(parents=True)
+    guion = _guion([{"id": "p02", "seccion": "hook", "duracion_seg": 10, "narracion": "algo"}])
+    (slug_dir / "guion.json").write_text(json.dumps(guion), encoding="utf-8")
+
+    cargado = summary.load_guion_dict("caso3")
+    assert cargado["titulo"] == "Caso de prueba"
+
+    plano = summary.find_plano(cargado, "P02")
+    assert plano is not None
+    assert plano["id"] == "p02"
+
+    assert summary.find_plano(cargado, "p99") is None
+
+
+def test_load_guion_dict_inexistente_devuelve_none(tmp_path, monkeypatch):
+    monkeypatch.setattr(summary, "ANDROID_IN", tmp_path / "in")
+    monkeypatch.setattr(summary, "NARRATOR_PROJECTS", tmp_path / "narrator")
+    assert summary.load_guion_dict("no-existe") is None
