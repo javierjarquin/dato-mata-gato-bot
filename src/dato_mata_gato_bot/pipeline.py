@@ -45,7 +45,7 @@ def _run(args: list[str], cwd: str | None = None, env: dict | None = None) -> su
     )
 
 
-def _generate_audio(slug: str, voz: str, velocidad: float = 1.15) -> tuple[bool, str]:
+def _generate_audio(slug: str, voz: str, velocidad: float = 1.0) -> tuple[bool, str]:
     guion_path = TTS_KOKORO_PROJECTS / slug / "guion.json"
     proc = _run([
         TTS_KOKORO_PY, "-m", "tts_kokoro.cli",
