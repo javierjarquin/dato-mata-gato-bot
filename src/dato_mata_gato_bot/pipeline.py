@@ -13,7 +13,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from dato_mata_gato_bot import media_check, sessions
+from dato_mata_gato_bot import drive_upload, media_check, publish_schedule, sessions
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +22,11 @@ TTS_KOKORO_PROJECTS = Path(r"C:\tts-kokoro\projects")
 NARRATOR_PROJECTS = Path(r"C:\illustrated-narrator\projects")
 POETRY_EXE = r"C:\Users\jarqu\AppData\Roaming\Python\Scripts\poetry.exe"
 ANDROID_IN = Path(r"C:\Android_in")
-ANDROID_OUT = Path(r"C:\Android_out")
 FFMPEG = "ffmpeg"
+GOOGLE_DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "")
 
 MAX_AUTO_RETRIES = 2
-SUBPROCESS_TIMEOUT_SECONDS = 60 * 60
+SUBPROCESS_TIMEOUT_SECONDS = 60 * 60 * 2
 
 
 @dataclass
@@ -37,12 +37,44 @@ class PipelineResult:
     flagged: list[media_check.FlaggedShot] = field(default_factory=list)
 
 
+def _kill_process_tree(pid: int) -> None:
+    """`Popen.kill()` en Windows solo mata el proceso de arriba (poetry.exe),
+    no sus descendientes -- python.exe y ffmpeg.exe quedan huérfanos y
+    corriendo, y pueden seguir escribiendo archivos de una corrida vieja
+    mientras el bot ya arrancó la siguiente (mismo bug confirmado en una
+    corrida real de illustrated-narrator: así se corrompió un final.mp4 sin
+    que nadie lo notara, con el proceso "ganador" reportando éxito igual).
+    `taskkill /T` sí mata el árbol completo."""
+    subprocess.run(
+        ["taskkill", "/F", "/T", "/PID", str(pid)],
+        capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+
+
 def _run(args: list[str], cwd: str | None = None, env: dict | None = None) -> subprocess.CompletedProcess:
     logger.info("Ejecutando: %s", " ".join(str(a) for a in args))
-    return subprocess.run(
-        args, cwd=cwd, env=env, capture_output=True, text=True, encoding="utf-8",
-        timeout=SUBPROCESS_TIMEOUT_SECONDS, creationflags=subprocess.CREATE_NO_WINDOW,
+    proc = subprocess.Popen(
+        args, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, encoding="utf-8", creationflags=subprocess.CREATE_NO_WINDOW,
     )
+    try:
+        stdout, stderr = proc.communicate(timeout=SUBPROCESS_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        # No se relanza el TimeoutExpired: antes se propagaba sin atrapar
+        # hasta bot.py (pipeline.run no tiene try/except alrededor), lo que
+        # dejaba la corrida colgada en el hilo del bot sin que el usuario
+        # recibiera jamás una respuesta en Telegram. Devolver un
+        # CompletedProcess con returncode != 0 reusa el mismo camino de
+        # necesita_claude=True que ya usa cada otro fallo de este archivo.
+        logger.error(
+            "Timeout de %ds corriendo %s -- matando árbol de procesos (PID %d)",
+            SUBPROCESS_TIMEOUT_SECONDS, args[0], proc.pid,
+        )
+        _kill_process_tree(proc.pid)
+        stdout, stderr = proc.communicate()  # drena lo que ya estaba bufferizado
+        stderr = (stderr or "") + f"\n[TIMEOUT tras {SUBPROCESS_TIMEOUT_SECONDS}s -- proceso matado]"
+        return subprocess.CompletedProcess(args, returncode=-1, stdout=stdout, stderr=stderr)
+    return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
 
 
 def _generate_audio(slug: str, voz: str, velocidad: float = 1.0) -> tuple[bool, str]:
@@ -130,11 +162,16 @@ def _delete_flagged_assets(slug: str, flagged: list[media_check.FlaggedShot]) ->
             video.unlink()
 
 
-def _copy_to_android_out(slug: str) -> Path:
-    src = NARRATOR_PROJECTS / slug / "final.mp4"
-    dest = ANDROID_OUT / f"{slug}.mp4"
-    shutil.copy(src, dest)
-    return dest
+def _upload_to_drive(slug: str) -> str:
+    if not GOOGLE_DRIVE_FOLDER_ID:
+        raise RuntimeError("Falta GOOGLE_DRIVE_FOLDER_ID en el .env del bot")
+    guion = json.loads((NARRATOR_PROJECTS / slug / "guion.json").read_text(encoding="utf-8"))
+    titulo = guion.get("titulo") or slug
+    fecha = publish_schedule.assign_date(slug)
+    final_mp4 = NARRATOR_PROJECTS / slug / "final.mp4"
+    nombre, link = drive_upload.upload_video(final_mp4, titulo, fecha, GOOGLE_DRIVE_FOLDER_ID)
+    publish_schedule.record_upload(slug, nombre, link)
+    return f"{nombre} (publicar el {fecha[:2]}/{fecha[2:4]}/{fecha[4:]}) -> {link}"
 
 
 def _stage_guion_for_tts(slug: str) -> None:
@@ -201,6 +238,11 @@ def run(slug: str, voz: str, chat_id: int | None = None) -> PipelineResult:
             necesita_claude=True, flagged=flagged,
         )
 
-    progreso("copiando a Android_out")
-    dest = _copy_to_android_out(slug)
-    return PipelineResult(True, f"Video listo, sin intervención de Claude: {dest}")
+    progreso("subiendo a Google Drive")
+    try:
+        detalle = _upload_to_drive(slug)
+    except Exception as exc:  # noqa: BLE001 — el video ya existe local, solo falló la subida
+        return PipelineResult(
+            False, f"Video generado pero falló la subida a Drive:\n{exc}", necesita_claude=True
+        )
+    return PipelineResult(True, f"Video listo y subido a Drive, sin intervención de Claude: {detalle}")

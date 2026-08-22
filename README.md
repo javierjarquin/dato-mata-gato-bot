@@ -27,15 +27,16 @@ El bot separa **recolectar archivos** (puro manejo de archivos) de
    (`claude -p ... --session-id/--resume`) con el detalle exacto de lo
    pendiente, para que investigue/decida lo que el código no puede.
 5. `/estatus` — el paso real en el que va (generando audio, armando
-   proyecto, reintento N/M, copiando a Android_out), no solo tiempo
+   proyecto, reintento N/M, subiendo a Google Drive), no solo tiempo
    transcurrido.
 6. Los mensajes de texto libres sí siguen la conversación con Claude
    (`--resume`, memoria real) para pedir ajustes después de generar.
    `/nuevo` la reinicia desde cero.
 
 El video final **no se manda por Telegram** (pesa ~200MB+, por encima
-del límite de 50MB para bots) — llega a `C:\Android_out` como siempre, y
-de ahí a tu celular vía Syncthing. El bot solo avisa por texto.
+del límite de 50MB para bots) — se sube directo a una carpeta de Google
+Drive, con nombre progresivo `<titulo>_<DDMMYYYY>.mp4` según el calendario
+de publicación (`/videos` lo muestra). El bot solo avisa por texto.
 
 ## Instalación
 
@@ -55,6 +56,25 @@ cp .env.example .env   # completar TELEGRAM_BOT_TOKEN
    defecto, nadie puede usarlo hasta que lo autorices).
 3. Agrega ese `chat_id` a `TELEGRAM_ALLOWED_CHAT_IDS` en el `.env` y
    reinicia el bot.
+
+## Google Drive (subida del video final)
+
+1. Proyecto en Google Cloud Console con la Drive API activada + credencial
+   OAuth tipo "Desktop app" (Client ID). Descargá el JSON y guardalo como
+   `credentials/google_drive_client_secret.json`.
+2. Completá `GOOGLE_DRIVE_FOLDER_ID` en el `.env` con el ID de la carpeta
+   de Drive destino (el string en la URL después de `/folders/`).
+3. Autorización única (abre el navegador, elegís tu cuenta, aceptás):
+   ```
+   .venv\Scripts\python.exe -m dato_mata_gato_bot.drive_auth
+   ```
+   Esto guarda un refresh token en `credentials/google_drive_token.json`
+   que se reutiliza siempre — no hay que repetir este paso salvo que lo
+   revoques desde tu cuenta de Google.
+4. Cada video que termina el pipeline sube solo, con nombre progresivo
+   `<titulo_del_guion>_<DDMMYYYY>.mp4` (el calendario arranca en el
+   25/08/2026 y avanza un día por cada capítulo nuevo — `/videos` lo
+   muestra).
 
 ## Arranque automático con Windows
 

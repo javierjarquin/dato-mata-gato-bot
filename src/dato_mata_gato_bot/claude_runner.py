@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 CLAUDE_EXE = "claude"
 CWD = r"C:\illustrated-narrator"
-ADD_DIRS = [r"C:\tts-kokoro", r"C:\Android_in", r"C:\Android_out"]
+ADD_DIRS = [r"C:\tts-kokoro", r"C:\Android_in", r"C:\dato-mata-gato-bot"]
 
 # Sin timeout corto: generar un video (transcripcion + investigacion de
 # medios + ensamblado) toma facilmente 10-20 minutos.

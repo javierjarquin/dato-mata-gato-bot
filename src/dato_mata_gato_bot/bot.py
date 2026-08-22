@@ -64,8 +64,10 @@ INSTRUCCION_ESCALAR = (
     "con reintentos ya agotados. Esto quedó sin resolver:\n\n{detalle}\n\n"
     "Resolvelo vos siguiendo CLAUDE.md (investigar/ajustar busqueda_medios, o ficha de "
     "texto si no hay foto real, etc.), corré narrator generate las veces que haga falta "
-    "TODO EN FOREGROUND, y copiá el resultado final a Android_out vos mismo. Avisame "
-    "cuando esté listo, o si algo no se puede resolver."
+    "TODO EN FOREGROUND, y cuando final.mp4 esté listo subilo a Drive vos mismo con:\n"
+    "C:\\dato-mata-gato-bot\\.venv\\Scripts\\python.exe -m dato_mata_gato_bot.upload_cli {slug}\n"
+    "(desde cualquier carpeta -- ese comando ya arma el nombre progresivo y actualiza el "
+    "calendario de publicación solo). Avisame cuando esté listo, o si algo no se puede resolver."
 )
 
 
@@ -137,7 +139,8 @@ HELP_TEXT = """Comandos disponibles — flujo típico: /nuevovideo → mandar gu
   Requiere: proyecto actual con guion.json ya recibido.
 
 /videos
-  Lista todos los videos ya generados en Android_out (nombre, tamaño, fecha).
+  Lista el calendario de publicación: qué video, para qué fecha, y si ya se subió
+  a Drive o sigue pendiente.
   Ejemplo: /videos
 
 /voz [nombre]
@@ -184,7 +187,7 @@ BOT_COMMANDS = [
     ("generar", "Correr el pipeline completo del proyecto actual"),
     ("estatus", "Ver si hay algo corriendo y en qué paso va"),
     ("resumen", "Narración y estado de medios de cada plano"),
-    ("videos", "Listar los videos ya generados en Android_out"),
+    ("videos", "Calendario de publicación (fecha + estado de subida)"),
     ("voz", "Ver o elegir la voz [nombre opcional]"),
     ("logo", "Mandar/actualizar el logo del canal"),
     ("investigar", "Buscar imágenes libres [url, plano o palabras clave]"),

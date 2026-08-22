@@ -1,45 +1,49 @@
-"""Lista los videos ya generados en Android_out -- puro código, sin
-Claude. Solo lee el sistema de archivos."""
+"""Lista los videos programados/publicados en Drive -- puro código, sin
+Claude. Lee publish_schedule.json, no llama a la API de Drive."""
 
 from dataclasses import dataclass
-from datetime import datetime
-from pathlib import Path
+from datetime import date
 
-ANDROID_OUT = Path(r"C:\Android_out")
+from dato_mata_gato_bot import publish_schedule
 
 
 @dataclass(frozen=True)
 class VideoInfo:
     slug: str
-    ruta: Path
-    tamano_mb: float
-    modificado: datetime
+    nombre_archivo: str | None
+    fecha_publicacion: date | None
+    drive_link: str | None
+
+    @property
+    def subido(self) -> bool:
+        return self.drive_link is not None
 
 
 def list_generated_videos() -> list[VideoInfo]:
-    """Más reciente primero."""
-    if not ANDROID_OUT.exists():
-        return []
-
+    """Ordenado por fecha de publicación, más próxima primero."""
+    data = publish_schedule.all_entries()
     videos = []
-    for f in ANDROID_OUT.glob("*.mp4"):
-        stat = f.stat()
+    for slug, entry in data.items():
+        fecha_str = entry.get("fecha")
+        fecha = publish_schedule.parse_fecha(fecha_str) if fecha_str else None
         videos.append(VideoInfo(
-            slug=f.stem,
-            ruta=f,
-            tamano_mb=round(stat.st_size / (1024 * 1024), 1),
-            modificado=datetime.fromtimestamp(stat.st_mtime),
+            slug=slug,
+            nombre_archivo=entry.get("nombre_archivo"),
+            fecha_publicacion=fecha,
+            drive_link=entry.get("drive_link"),
         ))
-    videos.sort(key=lambda v: v.modificado, reverse=True)
+    videos.sort(key=lambda v: v.fecha_publicacion or date.max)
     return videos
 
 
 def format_video_list(videos: list[VideoInfo]) -> str:
     if not videos:
-        return f"Todavía no hay ningún video generado en {ANDROID_OUT}."
+        return "Todavía no hay ningún video programado."
 
-    lineas = [f"{len(videos)} video(s) generado(s):", ""]
+    lineas = [f"{len(videos)} video(s):", ""]
     for v in videos:
-        fecha = v.modificado.strftime("%d/%m/%Y %H:%M")
-        lineas.append(f"• {v.slug} — {v.tamano_mb} MB — {fecha}")
+        fecha = v.fecha_publicacion.strftime("%d/%m/%Y") if v.fecha_publicacion else "?"
+        estado = "subido" if v.subido else "PENDIENTE de subir"
+        nombre = v.nombre_archivo or v.slug
+        lineas.append(f"• {nombre} — publicar el {fecha} — {estado}")
     return "\n".join(lineas)
