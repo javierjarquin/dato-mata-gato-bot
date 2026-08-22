@@ -94,7 +94,15 @@ def _apply_logo(dest_dir: Path) -> None:
         return
     target_dir = dest_dir / "media" / "p00"
     target_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy(logo, target_dir / f"elegido_1{logo.suffix}")
+    # "elegido" SIN índice (no "elegido_1"): _manual_override en
+    # research_plano_media.py prueba primero "elegido_<N>.*" por toma y
+    # cae a "elegido.*" si no hay uno específico -- así el logo cubre
+    # TODAS las tomas del plano, sin importar en cuántas se termine
+    # partiendo. Con "elegido_1" fijo, si p00 dura apenas más de 4s reales
+    # (duracion_seg es solo estimado) se parte en 2 tomas y la 2da cae en
+    # la búsqueda real: confirmado en corridas reales, eligió una moneda
+    # de bitcoin de stock como "mejor match" para la query del logo.
+    shutil.copy(logo, target_dir / f"elegido{logo.suffix}")
 
 
 def _apply_manual_images(slug: str, dest_dir: Path) -> None:
