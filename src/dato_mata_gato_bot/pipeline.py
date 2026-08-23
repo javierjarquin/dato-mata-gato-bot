@@ -13,6 +13,8 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import requests
+
 from dato_mata_gato_bot import drive_upload, media_check, publish_schedule, sessions
 
 logger = logging.getLogger(__name__)
@@ -24,6 +26,17 @@ POETRY_EXE = r"C:\Users\jarqu\AppData\Roaming\Python\Scripts\poetry.exe"
 ANDROID_IN = Path(r"C:\Android_in")
 FFMPEG = "ffmpeg"
 GOOGLE_DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "")
+
+# El fallback de video-IA (NARR_VIDEO_FALLBACK_MAX_PLANOS en el .env de
+# illustrated-narrator) necesita A1111 con --api corriendo. Ahí mismo NO
+# se autolanza a propósito (ver su CLAUDE.md, decisión para sesiones
+# interactivas) -- pero el pipeline automático del bot sí necesita que
+# esté listo sin que nadie lo prenda a mano, si no el fallback simplemente
+# no dispara nunca (is_available() da False, salta directo a FALLIDO).
+A1111_BASE_URL = "http://127.0.0.1:7860"
+A1111_BAT = r"C:\illustrated-narrator\tools\run_a1111.bat"
+A1111_TOOLS_DIR = r"C:\illustrated-narrator\tools"
+A1111_HEALTH_TIMEOUT = 3
 
 MAX_AUTO_RETRIES = 2
 SUBPROCESS_TIMEOUT_SECONDS = 60 * 60 * 2
@@ -75,6 +88,35 @@ def _run(args: list[str], cwd: str | None = None, env: dict | None = None) -> su
         stderr = (stderr or "") + f"\n[TIMEOUT tras {SUBPROCESS_TIMEOUT_SECONDS}s -- proceso matado]"
         return subprocess.CompletedProcess(args, returncode=-1, stdout=stdout, stderr=stderr)
     return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
+
+
+def _a1111_ready() -> bool:
+    try:
+        resp = requests.get(f"{A1111_BASE_URL}/sdapi/v1/sd-models", timeout=A1111_HEALTH_TIMEOUT)
+        return resp.ok
+    except requests.RequestException:
+        return False
+
+
+def _kick_off_a1111_if_needed() -> None:
+    """Lanza A1111 en segundo plano sin esperar a que cargue -- no bloquea
+    el pipeline. Para cuando llegue a research_plano_media/generate_images
+    (varios pasos después: audio, ffmpeg concat, investigación de medios de
+    TODOS los planos) ya debería estar listo si hacía falta. Si no llegó a
+    tiempo, el fallback simplemente se salta esta vez (is_available()==False
+    -> plano queda FALLIDO como si el fallback estuviera desactivado) --
+    nunca bloquea ni rompe la corrida."""
+    if _a1111_ready():
+        return
+    logger.info("A1111 no está corriendo, arrancándolo en paralelo (%s)", A1111_BAT)
+    try:
+        subprocess.Popen(
+            [A1111_BAT], cwd=A1111_TOOLS_DIR,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    except OSError as exc:
+        logger.warning("No se pudo arrancar A1111 (%s); el fallback de video-IA se saltará si hace falta", exc)
 
 
 def _generate_audio(slug: str, voz: str, velocidad: float = 1.0) -> tuple[bool, str]:
@@ -203,6 +245,7 @@ def run(slug: str, voz: str, chat_id: int | None = None) -> PipelineResult:
     if not guion_src.exists():
         return PipelineResult(False, f"No existe {guion_src}", necesita_claude=False)
     _stage_guion_for_tts(slug)
+    _kick_off_a1111_if_needed()
 
     progreso("generando audio (tts-kokoro)")
     ok, out = _generate_audio(slug, voz)
