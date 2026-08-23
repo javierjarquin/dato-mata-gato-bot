@@ -19,6 +19,7 @@ PHASE_COLLECTING = "recolectando"
 DEFAULT_VOICE = "am_adam"
 LOGO_DIR = Path(r"C:\illustrated-narrator\assets")
 LOGO_STEM = "dato_mata_gato_logo"
+CIERRE_STEM = "dato_mata_gato_cierre"
 
 
 def _load() -> dict[str, Any]:
@@ -140,6 +141,28 @@ def logo_path() -> Path | None:
     if not LOGO_DIR.exists():
         return None
     for p in LOGO_DIR.glob(f"{LOGO_STEM}.*"):
+        return p
+    return None
+
+
+def set_awaiting_cierre(chat_id: int, waiting: bool) -> None:
+    _update(chat_id, awaiting_cierre=waiting)
+
+
+def is_awaiting_cierre(chat_id: int) -> bool:
+    return bool(get_chat_state(chat_id).get("awaiting_cierre"))
+
+
+def cierre_path() -> Path | None:
+    """Ruta del cartel/clip de cierre fijo del canal si ya se subió alguno
+    con /cierre. Mismo principio que logo_path(): el plano identidad_cierre
+    (logo final sobre negro puro) es contenido genérico que ninguna
+    búsqueda de stock real puede encontrar -- en vez de que el pipeline se
+    quede sin medio y escale a Claude cada vez, usa siempre este archivo
+    fijo, igual que el logo de apertura en el plano 0."""
+    if not LOGO_DIR.exists():
+        return None
+    for p in LOGO_DIR.glob(f"{CIERRE_STEM}.*"):
         return p
     return None
 

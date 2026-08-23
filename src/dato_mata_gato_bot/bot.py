@@ -155,6 +155,14 @@ HELP_TEXT = """Comandos disponibles — flujo típico: /nuevovideo → mandar gu
   imagen (adjunta, no un link). Se usa siempre en el plano 0 de todos los videos.
   Ejemplo: /logo, después adjuntar la foto del logo.
 
+/cierre
+  Prepara el bot para recibir el cartel de cierre del canal — el siguiente mensaje
+  debe ser la imagen (adjunta, no un link). Se usa siempre en el plano final
+  (identidad_cierre) de todos los videos, en vez de dejarlo sin resolver (ese plano
+  es un logo genérico sobre negro puro — ninguna búsqueda de stock real lo va a
+  encontrar nunca).
+  Ejemplo: /cierre, después adjuntar la imagen de cierre.
+
 /investigar <url | id de plano | palabras clave>
   Busca imágenes con licencia libre (Wikipedia + Openverse + NASA) y te las manda
   una por una (con fuente, licencia y autor) para que elijas. Con un id de plano
@@ -190,6 +198,7 @@ BOT_COMMANDS = [
     ("videos", "Calendario de publicación (fecha + estado de subida)"),
     ("voz", "Ver o elegir la voz [nombre opcional]"),
     ("logo", "Mandar/actualizar el logo del canal"),
+    ("cierre", "Mandar/actualizar el cartel de cierre del canal"),
     ("investigar", "Buscar imágenes libres [url, plano o palabras clave]"),
     ("nuevo", "Reiniciar la conversación con Claude"),
     ("ayuda", "Ver todos los comandos con ejemplos"),
@@ -419,6 +428,21 @@ async def cmd_logo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+async def cmd_cierre(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    if not _authorized(chat_id):
+        await _reject_unauthorized(update)
+        return
+
+    actual = sessions.cierre_path()
+    sessions.set_awaiting_cierre(chat_id, True)
+    aviso_actual = f" (ya hay uno: {actual.name})" if actual else ""
+    await update.message.reply_text(
+        f"Mándame la imagen de cierre del canal{aviso_actual} — se va a usar siempre "
+        f"en el plano final de todos los videos nuevos."
+    )
+
+
 async def cmd_estatus(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     if not _authorized(chat_id):
@@ -515,6 +539,18 @@ async def _handle_image(update: Update, chat_id: int, tg_file, suffix: str) -> N
         )
         return
 
+    if sessions.is_awaiting_cierre(chat_id):
+        sessions.LOGO_DIR.mkdir(parents=True, exist_ok=True)
+        for old in sessions.LOGO_DIR.glob(f"{sessions.CIERRE_STEM}.*"):
+            old.unlink()
+        dest_path = sessions.LOGO_DIR / f"{sessions.CIERRE_STEM}{suffix}"
+        await tg_file.download_to_drive(custom_path=str(dest_path))
+        sessions.set_awaiting_cierre(chat_id, False)
+        await update.message.reply_text(
+            f"Cierre guardado en {dest_path}. Se va a usar en el plano final de ahora en adelante."
+        )
+        return
+
     slug = sessions.get_slug(chat_id)
     if not slug:
         await update.message.reply_text(
@@ -583,6 +619,7 @@ def main() -> None:
     app.add_handler(CommandHandler("investigar", cmd_investigar))
     app.add_handler(CommandHandler("voz", cmd_voz))
     app.add_handler(CommandHandler("logo", cmd_logo))
+    app.add_handler(CommandHandler("cierre", cmd_cierre))
     app.add_handler(CommandHandler("nuevo", cmd_nuevo))
     app.add_handler(MessageHandler(filters.Document.ALL, on_document))
     app.add_handler(MessageHandler(filters.PHOTO, on_photo))

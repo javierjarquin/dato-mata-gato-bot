@@ -71,3 +71,25 @@ def test_logo_path_encuentra_cualquier_extension(tmp_path, monkeypatch):
     logo_file.write_bytes(b"fake-png")
 
     assert sessions.logo_path() == logo_file
+
+
+def test_awaiting_cierre_flag(tmp_path, monkeypatch):
+    monkeypatch.setattr(sessions, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(sessions, "SESSIONS_PATH", tmp_path / "sessions.json")
+
+    assert sessions.is_awaiting_cierre(333) is False
+    sessions.set_awaiting_cierre(333, True)
+    assert sessions.is_awaiting_cierre(333) is True
+    sessions.set_awaiting_cierre(333, False)
+    assert sessions.is_awaiting_cierre(333) is False
+
+
+def test_cierre_path_encuentra_cualquier_extension(tmp_path, monkeypatch):
+    monkeypatch.setattr(sessions, "LOGO_DIR", tmp_path / "assets")
+    assert sessions.cierre_path() is None
+
+    sessions.LOGO_DIR.mkdir(parents=True)
+    cierre_file = sessions.LOGO_DIR / f"{sessions.CIERRE_STEM}.png"
+    cierre_file.write_bytes(b"fake-png")
+
+    assert sessions.cierre_path() == cierre_file

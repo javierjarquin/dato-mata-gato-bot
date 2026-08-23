@@ -147,6 +147,27 @@ def _apply_logo(dest_dir: Path) -> None:
     shutil.copy(logo, target_dir / f"elegido{logo.suffix}")
 
 
+def _apply_cierre(dest_dir: Path, guion: dict) -> None:
+    """Mismo mecanismo que _apply_logo, para el plano identidad_cierre (el
+    logo final sobre negro puro -- contenido genérico que ninguna búsqueda
+    de stock real puede encontrar, confirmado en corridas reales: siempre
+    termina escalando a Claude). El id del plano varía (p09, p10, p11...
+    según cuántos planos tenga el guion), así que se busca por
+    seccion=="identidad_cierre" en vez de un id fijo -- ese valor sí es
+    estable en todos los guiones (simétrico a identidad_apertura de p00)."""
+    cierre = sessions.cierre_path()
+    if not cierre:
+        return
+    plano = next(
+        (p for p in guion.get("planos", []) if p.get("seccion") == "identidad_cierre"), None
+    )
+    if plano is None:
+        return
+    target_dir = dest_dir / "media" / plano["id"]
+    target_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy(cierre, target_dir / f"elegido{cierre.suffix}")
+
+
 def _apply_manual_images(slug: str, dest_dir: Path) -> None:
     manual_dir = ANDROID_IN / slug / "imagenes_manuales"
     if not manual_dir.exists():
@@ -187,6 +208,7 @@ def _setup_narrator_project(slug: str) -> None:
         raise RuntimeError(f"ffmpeg concat falló:\n{proc.stderr[-1500:]}")
 
     _apply_logo(dest_dir)
+    _apply_cierre(dest_dir, guion)
     _apply_manual_images(slug, dest_dir)
 
 
