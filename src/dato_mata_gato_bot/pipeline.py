@@ -218,7 +218,13 @@ def _setup_narrator_project(slug: str) -> None:
 
 
 def _run_narrator_generate(slug: str) -> tuple[bool, str]:
-    env = {**os.environ, "NARR_NARRACION": "voz"}
+    # NARR_A1111_RESTART_BEFORE_USE=1: el fallback de video-IA daba 500 en
+    # la segunda generación de una misma corrida (agotamiento de VRAM entre
+    # generaciones consecutivas de AnimateDiff, confirmado en corrida real
+    # -- ver a1111_lifecycle.py en illustrated-narrator). Solo acá, en las
+    # corridas automáticas del bot -- nunca por default en una sesión
+    # interactiva, donde reiniciar A1111 solo sería sorpresivo.
+    env = {**os.environ, "NARR_NARRACION": "voz", "NARR_A1111_RESTART_BEFORE_USE": "1"}
     proc = _run(
         [POETRY_EXE, "run", "narrator", "generate", slug, "--vertical"],
         cwd=r"C:\illustrated-narrator", env=env,
