@@ -38,7 +38,12 @@ A1111_BAT = r"C:\illustrated-narrator\tools\run_a1111.bat"
 A1111_TOOLS_DIR = r"C:\illustrated-narrator\tools"
 A1111_HEALTH_TIMEOUT = 3
 
-MAX_AUTO_RETRIES = 2
+# Subido de 2 a 10 a pedido explícito del usuario (23/08/2026): con 2, el
+# pipeline escalaba a Claude en casi todos los capítulos. La mayoría de
+# los reintentos son rápidos (solo re-investigan las tomas marcadas, no
+# todo el capítulo -- resolve_shot_asset se salta lo ya resuelto), así que
+# subir el tope no vuelve el pipeline mucho más lento en el caso típico.
+MAX_AUTO_RETRIES = 10
 SUBPROCESS_TIMEOUT_SECONDS = 60 * 60 * 2
 
 
