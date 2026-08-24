@@ -21,9 +21,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
-from telegram import Update
-from telegram.constants import ParseMode
-from telegram.ext import (
+
+# ANTES que cualquier import de dato_mata_gato_bot.* -- importar esos módulos
+# ejecuta su código de nivel de módulo, y si alguno lee una variable de
+# entorno ahí (no adentro de una función) queda fija con lo que hubiera
+# ANTES de cargar el .env, para siempre (confirmado en una corrida real:
+# pipeline.GOOGLE_DRIVE_FOLDER_ID quedaba en "" pese a que el .env sí lo
+# tenía, porque el import de pipeline pasaba antes que este load_dotenv()).
+load_dotenv()
+
+from telegram import Update  # noqa: E402
+from telegram.constants import ParseMode  # noqa: E402
+from telegram.ext import (  # noqa: E402
     Application,
     CommandHandler,
     ContextTypes,
@@ -31,7 +40,7 @@ from telegram.ext import (
     filters,
 )
 
-from dato_mata_gato_bot import (
+from dato_mata_gato_bot import (  # noqa: E402
     auto_query,
     free_image_search,
     generated_videos,
@@ -41,10 +50,8 @@ from dato_mata_gato_bot import (
     summary,
     wiki_images,
 )
-from dato_mata_gato_bot.claude_runner import run_turn
-from dato_mata_gato_bot.logging_config import setup_logging
-
-load_dotenv()  # antes de leer TELEGRAM_ALLOWED_CHAT_IDS a nivel de modulo
+from dato_mata_gato_bot.claude_runner import run_turn  # noqa: E402
+from dato_mata_gato_bot.logging_config import setup_logging  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

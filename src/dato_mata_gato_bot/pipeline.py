@@ -25,7 +25,6 @@ NARRATOR_PROJECTS = Path(r"C:\illustrated-narrator\projects")
 POETRY_EXE = r"C:\Users\jarqu\AppData\Roaming\Python\Scripts\poetry.exe"
 ANDROID_IN = Path(r"C:\Android_in")
 FFMPEG = "ffmpeg"
-GOOGLE_DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "")
 
 # El fallback de video-IA (NARR_VIDEO_FALLBACK_MAX_PLANOS en el .env de
 # illustrated-narrator) necesita A1111 con --api corriendo. Ahí mismo NO
@@ -246,13 +245,21 @@ def _delete_flagged_assets(slug: str, flagged: list[media_check.FlaggedShot]) ->
 
 
 def _upload_to_drive(slug: str) -> str:
-    if not GOOGLE_DRIVE_FOLDER_ID:
+    # Leído en el momento (no como constante a nivel de módulo): bot.py
+    # importa este módulo ANTES de llamar load_dotenv() (import primero,
+    # load_dotenv() recién en la línea siguiente -- ver bot.py), así que
+    # una constante de módulo acá quedaba fija en "" para siempre, sin
+    # importar qué tuviera el .env -- confirmado en una corrida real: la
+    # subida fallaba con "Falta GOOGLE_DRIVE_FOLDER_ID" aunque el .env sí
+    # lo tenía.
+    folder_id = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "")
+    if not folder_id:
         raise RuntimeError("Falta GOOGLE_DRIVE_FOLDER_ID en el .env del bot")
     guion = json.loads((NARRATOR_PROJECTS / slug / "guion.json").read_text(encoding="utf-8"))
     titulo = guion.get("titulo") or slug
     fecha = publish_schedule.assign_date(slug)
     final_mp4 = NARRATOR_PROJECTS / slug / "final.mp4"
-    nombre, link = drive_upload.upload_video(final_mp4, titulo, fecha, GOOGLE_DRIVE_FOLDER_ID)
+    nombre, link = drive_upload.upload_video(final_mp4, titulo, fecha, folder_id)
     publish_schedule.record_upload(slug, nombre, link)
     return f"{nombre} (publicar el {fecha[:2]}/{fecha[2:4]}/{fecha[4:]}) -> {link}"
 
