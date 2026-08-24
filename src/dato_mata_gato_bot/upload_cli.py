@@ -6,7 +6,15 @@ Android_out" que se hacía a mano). Uso:
 
 import sys
 
-from dato_mata_gato_bot import pipeline
+from dotenv import load_dotenv
+
+# Antes del import de pipeline: este script nunca llamaba load_dotenv(),
+# así que GOOGLE_DRIVE_FOLDER_ID (y cualquier otra variable de .env) nunca
+# llegaba al proceso -- confirmado en una corrida real: "Falta
+# GOOGLE_DRIVE_FOLDER_ID en el .env del bot" pese a que el .env sí lo tiene.
+load_dotenv()
+
+from dato_mata_gato_bot import pipeline  # noqa: E402
 
 
 def main() -> None:
