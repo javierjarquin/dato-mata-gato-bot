@@ -19,6 +19,7 @@ import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -46,6 +47,7 @@ from dato_mata_gato_bot import (  # noqa: E402
     generated_videos,
     image_naming,
     pipeline,
+    scrape_poc,
     sessions,
     summary,
     wiki_images,
@@ -181,6 +183,12 @@ HELP_TEXT = """Comandos disponibles — flujo típico: /nuevovideo → mandar gu
     /investigar p02
     /investigar Alan Turing máquina Enigma
 
+/scrapear <url>
+  POC suelto, sin relación con el pipeline de Dato Mata Gato: baja las imágenes y
+  audios de ESA página (todavía no recorre el resto del sitio) y te manda una
+  vista previa acá. Sirve igual para sitios estáticos o SPAs de React.
+  Ejemplo: /scrapear https://mi-sitio.com
+
 /nuevo
   Reinicia la conversación con Claude desde cero (borra la memoria del chat, no tus
   archivos ni proyectos).
@@ -207,6 +215,7 @@ BOT_COMMANDS = [
     ("logo", "Mandar/actualizar el logo del canal"),
     ("cierre", "Mandar/actualizar el cartel de cierre del canal"),
     ("investigar", "Buscar imágenes libres [url, plano o palabras clave]"),
+    ("scrapear", "POC: bajar imágenes/audio de una página [url]"),
     ("nuevo", "Reiniciar la conversación con Claude"),
     ("ayuda", "Ver todos los comandos con ejemplos"),
 ]
@@ -370,6 +379,53 @@ async def cmd_investigar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         except Exception as exc:
             logger.warning("No pude mandar %s: %s", img.url, exc)
             await update.message.reply_text(f"No pude mandar {img.titulo} ({exc}).")
+
+
+# Tope de archivos que se reenvían por Telegram como preview -- el resto
+# queda igual en disco, solo se evita floodear el chat.
+_SCRAPE_PREVIEW_MAX = 8
+
+
+async def cmd_scrapear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """POC suelto (ver scrape_poc.py): baja imágenes/audio de UNA página
+    (no recorre el resto del sitio todavía) y manda una vista previa por
+    Telegram. Sin relación con el pipeline -- si esto falla no afecta a
+    /generar ni a nada más."""
+    chat_id = update.effective_chat.id
+    if not _authorized(chat_id):
+        await _reject_unauthorized(update)
+        return
+
+    if not context.args or not context.args[0].startswith("http"):
+        await update.message.reply_text(
+            "Uso: /scrapear <url>\n"
+            "Baja las imágenes y audios de esa página (solo esa, no recorre el resto del sitio) "
+            "y te manda una vista previa acá."
+        )
+        return
+
+    url = context.args[0]
+    out_dir = sessions.DATA_DIR / "scrape_poc" / _slugify(urlparse(url).netloc + urlparse(url).path)
+    await update.message.reply_text(f"Cargando {url}...")
+    try:
+        imagenes, audios = await asyncio.to_thread(scrape_poc.scrape_page, url, out_dir)
+    except Exception as exc:
+        await update.message.reply_text(f"Falló: {exc}")
+        return
+
+    await update.message.reply_text(
+        f"Encontré {len(imagenes)} imagen(es) y {len(audios)} audio(s). Guardado en {out_dir}"
+    )
+    for img in imagenes[:_SCRAPE_PREVIEW_MAX]:
+        try:
+            await update.message.reply_photo(photo=img.open("rb"))
+        except Exception as exc:
+            logger.warning("No pude mandar %s: %s", img, exc)
+    for aud in audios[:_SCRAPE_PREVIEW_MAX]:
+        try:
+            await update.message.reply_audio(audio=aud.open("rb"))
+        except Exception as exc:
+            logger.warning("No pude mandar %s: %s", aud, exc)
 
 
 async def cmd_videos(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -624,6 +680,7 @@ def main() -> None:
     app.add_handler(CommandHandler("resumen", cmd_resumen))
     app.add_handler(CommandHandler("videos", cmd_videos))
     app.add_handler(CommandHandler("investigar", cmd_investigar))
+    app.add_handler(CommandHandler("scrapear", cmd_scrapear))
     app.add_handler(CommandHandler("voz", cmd_voz))
     app.add_handler(CommandHandler("logo", cmd_logo))
     app.add_handler(CommandHandler("cierre", cmd_cierre))
