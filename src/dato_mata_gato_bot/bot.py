@@ -434,11 +434,26 @@ async def cmd_nuevolote(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await _send_long(update, "\n\n".join(lineas))
 
 
+async def _safe_reply(update: Update, text: str) -> None:
+    """reply_text que nunca tira -- un hipo de red de Telegram (visto real:
+    httpx.ReadTimeout/Bad Gateway al avisar progreso) no debe matar todo
+    /generarlote a mitad de camino. Sin esto, un aviso fallido silenciaba el
+    resto del lote entero (confirmado: se generaron 2/5 videos bien, pero
+    el crash al avisar el 2º dejó los otros 3 sin ni siquiera intentarse)."""
+    try:
+        await update.message.reply_text(text)
+    except Exception as exc:  # noqa: BLE001 — un aviso es best-effort, no crítico
+        logger.warning("No pude mandar un mensaje de progreso (%s): %s", exc, text[:200])
+
+
 async def cmd_generarlote(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Corre /generar en cadena para cada guion del último /nuevolote, uno
     detrás del otro (no en paralelo -- A1111/GPU es compartido). Si un
     video escala a Claude, no bloquea el lote: sigue con el siguiente y lo
-    reporta al final."""
+    reporta al final. Cada slug se saca de pending_batch apenas termina
+    (no todos juntos al final) -- así el lote es resumible: si el proceso
+    se cae por lo que sea, correr /generarlote de nuevo retoma justo en lo
+    que falta, sin repetir lo ya generado."""
     chat_id = update.effective_chat.id
     if not _authorized(chat_id):
         await _reject_unauthorized(update)
@@ -455,41 +470,53 @@ async def cmd_generarlote(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     voz = sessions.get_voice(chat_id)
-    await update.message.reply_text(
-        f"Arrancando el lote de {len(slugs)} video(s), uno detrás del otro. "
-        f"/estatus para ver en cuál va."
+    total = len(slugs)
+    await _safe_reply(
+        update,
+        f"Arrancando el lote de {total} video(s), uno detrás del otro. "
+        f"/estatus para ver en cuál va.",
     )
 
     ok_list: list[str] = []
     escalados: list[str] = []
     fallidos: list[str] = []
+    restantes = list(slugs)
     for i, slug in enumerate(slugs, start=1):
-        await update.message.reply_text(f"({i}/{len(slugs)}) Generando '{slug}'...")
-        sessions.set_generating(chat_id, True)
+        await _safe_reply(update, f"({i}/{total}) Generando '{slug}'...")
         try:
-            result = await asyncio.to_thread(pipeline.run, slug, voz, chat_id)
-        finally:
-            sessions.set_generating(chat_id, False)
-            sessions.set_progress(chat_id, None)
+            sessions.set_generating(chat_id, True)
+            try:
+                result = await asyncio.to_thread(pipeline.run, slug, voz, chat_id)
+            finally:
+                sessions.set_generating(chat_id, False)
+                sessions.set_progress(chat_id, None)
 
-        if result.ok:
-            ok_list.append(slug)
-            await update.message.reply_text(f"({i}/{len(slugs)}) '{slug}' listo: {result.mensaje}")
-        elif result.necesita_claude:
-            escalados.append(slug)
-            await update.message.reply_text(
-                f"({i}/{len(slugs)}) '{slug}' quedó sin terminar solo -- paso a Claude:\n{result.mensaje}"
-            )
-            await _dispatch_to_claude(update, INSTRUCCION_ESCALAR.format(slug=slug, detalle=result.mensaje))
-        else:
+            if result.ok:
+                ok_list.append(slug)
+                await _safe_reply(update, f"({i}/{total}) '{slug}' listo: {result.mensaje}")
+            elif result.necesita_claude:
+                escalados.append(slug)
+                await _safe_reply(
+                    update,
+                    f"({i}/{total}) '{slug}' quedó sin terminar solo -- paso a Claude:\n{result.mensaje}",
+                )
+                await _dispatch_to_claude(update, INSTRUCCION_ESCALAR.format(slug=slug, detalle=result.mensaje))
+            else:
+                fallidos.append(slug)
+                await _safe_reply(update, f"({i}/{total}) '{slug}' falló: {result.mensaje}")
+        except Exception as exc:  # noqa: BLE001 — un slug roto no debe tirar el resto del lote
             fallidos.append(slug)
-            await update.message.reply_text(f"({i}/{len(slugs)}) '{slug}' falló: {result.mensaje}")
+            logger.error("cmd_generarlote: '%s' explotó de forma inesperada: %s", slug, exc)
+            await _safe_reply(update, f"({i}/{total}) '{slug}' explotó de forma inesperada: {exc}")
+        finally:
+            restantes.remove(slug)
+            sessions.set_pending_batch(chat_id, restantes)
 
-    sessions.clear_pending_batch(chat_id)
     sessions.set_phase(chat_id, sessions.PHASE_IDLE)
-    await update.message.reply_text(
+    await _safe_reply(
+        update,
         f"Lote terminado. OK sin Claude: {len(ok_list)}. Escalados a Claude: {len(escalados)}. "
-        f"Fallidos: {len(fallidos)}."
+        f"Fallidos: {len(fallidos)}.",
     )
 
 

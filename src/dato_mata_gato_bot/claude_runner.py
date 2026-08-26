@@ -12,9 +12,15 @@ CLAUDE_EXE = "claude"
 CWD = r"C:\illustrated-narrator"
 ADD_DIRS = [r"C:\tts-kokoro", r"C:\Android_in", r"C:\dato-mata-gato-bot"]
 
-# Sin timeout corto: generar un video (transcripcion + investigacion de
-# medios + ensamblado) toma facilmente 10-20 minutos.
-SUBPROCESS_TIMEOUT_SECONDS = 60 * 60
+# Subido de 1h a 20h a pedido explícito del usuario (25/08/2026): /nuevolote
+# le pide a Claude escribir varios guiones investigados de una sola vez (no
+# es solo generar un video, ~10-20 min), y una escalada real puede implicar
+# varias corridas de narrator generate en foreground para resolver un caso
+# difícil -- 1h resultaba corto para eso. No es la causa del corte real de
+# /generarlote del 25/08 (ese fue un ReadTimeout de la API de Telegram al
+# avisar progreso, no de este subproceso -- ver cmd_generarlote/_safe_reply
+# en bot.py), pero igual se sube por las dudas.
+SUBPROCESS_TIMEOUT_SECONDS = 60 * 60 * 20
 
 
 @dataclass
