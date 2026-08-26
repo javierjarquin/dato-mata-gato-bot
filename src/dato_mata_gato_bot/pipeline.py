@@ -72,7 +72,15 @@ def _run(args: list[str], cwd: str | None = None, env: dict | None = None) -> su
     logger.info("Ejecutando: %s", " ".join(str(a) for a in args))
     proc = subprocess.Popen(
         args, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, encoding="utf-8", creationflags=subprocess.CREATE_NO_WINDOW,
+        # errors="replace": un subproceso (visto real: tts-kokoro) puede
+        # imprimir algún byte que no es UTF-8 válido (ej. un guion largo en
+        # cp1252 de la consola de Windows) -- sin esto, el hilo lector de
+        # subprocess.Popen.communicate() explota con UnicodeDecodeError y
+        # se pierde ese stream (comunicate() igual puede devolver algo si
+        # el OTRO stream sí se leyó bien, pero es buena suerte, no algo en
+        # lo que confiar).
+        text=True, encoding="utf-8", errors="replace",
+        creationflags=subprocess.CREATE_NO_WINDOW,
     )
     try:
         stdout, stderr = proc.communicate(timeout=SUBPROCESS_TIMEOUT_SECONDS)
