@@ -221,6 +221,18 @@ HELP_TEXT = """Comandos disponibles — flujo típico: /nuevovideo → mandar gu
   con el resto -- no se traba esperando a que se resuelva ese.
   Ejemplo: /generarlote
 
+/publicarfacebook [slug]
+  Publica un video YA GENERADO en la Página de Facebook configurada. Manual a
+  propósito -- todavía no se dispara solo desde /generar ni /generarlote, así se
+  prueba primero antes de engancharlo. Sin slug, usa el proyecto actual.
+  Ejemplo: /publicarfacebook guion-clancy
+
+/publicartiktok [slug]
+  Igual que /publicarfacebook pero en TikTok. Mientras la app no esté auditada
+  por TikTok, el video queda en modo privado (solo lo ve la cuenta que
+  autorizó) -- ver README para el proceso de auditoría.
+  Ejemplo: /publicartiktok guion-clancy
+
 /nuevo
   Reinicia la conversación con Claude desde cero (borra la memoria del chat, no tus
   archivos ni proyectos).
@@ -250,6 +262,8 @@ BOT_COMMANDS = [
     ("scrapear", "POC: bajar imágenes/audio de una página [url]"),
     ("nuevolote", "Pedirle a Claude varios guiones nuevos [cantidad]"),
     ("generarlote", "Generar los videos del último /nuevolote"),
+    ("publicarfacebook", "Publicar un video ya generado en Facebook [slug]"),
+    ("publicartiktok", "Publicar un video ya generado en TikTok [slug]"),
     ("nuevo", "Reiniciar la conversación con Claude"),
     ("ayuda", "Ver todos los comandos con ejemplos"),
 ]
@@ -477,6 +491,62 @@ async def cmd_generarlote(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         f"Lote terminado. OK sin Claude: {len(ok_list)}. Escalados a Claude: {len(escalados)}. "
         f"Fallidos: {len(fallidos)}."
     )
+
+
+async def cmd_publicarfacebook(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Publica un video YA GENERADO en la Página de Facebook configurada --
+    manual a propósito, nunca se dispara solo desde /generar ni /generarlote
+    todavía (a pedido explícito: primero probarlo, engancharlo después)."""
+    chat_id = update.effective_chat.id
+    if not _authorized(chat_id):
+        await _reject_unauthorized(update)
+        return
+
+    slug = context.args[0] if context.args else sessions.get_slug(chat_id)
+    if not slug:
+        await update.message.reply_text("Uso: /publicarfacebook <slug> (o corré /nuevovideo antes para fijar uno)")
+        return
+
+    final_mp4 = pipeline.NARRATOR_PROJECTS / slug / "final.mp4"
+    if not final_mp4.exists():
+        await update.message.reply_text(f"No existe {final_mp4} -- generá el video primero con /generar.")
+        return
+
+    await update.message.reply_text(f"Publicando '{slug}' en Facebook...")
+    ok, salida = await asyncio.to_thread(pipeline.publish_to_facebook, slug)
+    if ok:
+        await update.message.reply_text(f"Publicado en Facebook.\n{salida}")
+    else:
+        await update.message.reply_text(f"Falló:\n{salida}")
+
+
+async def cmd_publicartiktok(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Publica un video YA GENERADO en TikTok -- manual a propósito, igual
+    que /publicarfacebook. Sin auditoría de TikTok, queda en modo privado
+    (SELF_ONLY): solo lo ve la cuenta que autorizó la app."""
+    chat_id = update.effective_chat.id
+    if not _authorized(chat_id):
+        await _reject_unauthorized(update)
+        return
+
+    slug = context.args[0] if context.args else sessions.get_slug(chat_id)
+    if not slug:
+        await update.message.reply_text("Uso: /publicartiktok <slug> (o corré /nuevovideo antes para fijar uno)")
+        return
+
+    final_mp4 = pipeline.NARRATOR_PROJECTS / slug / "final.mp4"
+    if not final_mp4.exists():
+        await update.message.reply_text(f"No existe {final_mp4} -- generá el video primero con /generar.")
+        return
+
+    await update.message.reply_text(
+        f"Publicando '{slug}' en TikTok (modo privado hasta que la app esté auditada)..."
+    )
+    ok, salida = await asyncio.to_thread(pipeline.publish_to_tiktok, slug)
+    if ok:
+        await update.message.reply_text(f"Publicado en TikTok.\n{salida}")
+    else:
+        await update.message.reply_text(f"Falló:\n{salida}")
 
 
 async def cmd_investigar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -855,6 +925,8 @@ def main() -> None:
     app.add_handler(CommandHandler("scrapear", cmd_scrapear))
     app.add_handler(CommandHandler("nuevolote", cmd_nuevolote))
     app.add_handler(CommandHandler("generarlote", cmd_generarlote))
+    app.add_handler(CommandHandler("publicarfacebook", cmd_publicarfacebook))
+    app.add_handler(CommandHandler("publicartiktok", cmd_publicartiktok))
     app.add_handler(CommandHandler("voz", cmd_voz))
     app.add_handler(CommandHandler("logo", cmd_logo))
     app.add_handler(CommandHandler("cierre", cmd_cierre))

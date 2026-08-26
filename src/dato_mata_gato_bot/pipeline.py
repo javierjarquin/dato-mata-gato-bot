@@ -232,6 +232,31 @@ def _run_narrator_generate(slug: str) -> tuple[bool, str]:
     return ok, (proc.stdout[-3000:] + proc.stderr[-1500:])
 
 
+def publish_to_facebook(slug: str) -> tuple[bool, str]:
+    """Dispara `narrator publish` (Facebook Graph API, ya configurado y
+    verificado con una llamada real -- ver facebook_adapter.py). A PROPÓSITO
+    no se llama desde run()/_generarlote -- es manual, disparado a mano por
+    el usuario (/publicarfacebook) hasta que decida engancharlo al pipeline."""
+    proc = _run(
+        [POETRY_EXE, "run", "narrator", "publish", slug],
+        cwd=r"C:\illustrated-narrator",
+    )
+    ok = proc.returncode == 0
+    return ok, (proc.stdout[-2000:] + proc.stderr[-1000:])
+
+
+def publish_to_tiktok(slug: str) -> tuple[bool, str]:
+    """Dispara `narrator publish-tiktok`. Sin auditoría de TikTok todavía,
+    el video queda en modo privado (SELF_ONLY) -- ver tiktok_publisher.py.
+    Igual que Facebook, manual a propósito: no se llama desde run()."""
+    proc = _run(
+        [POETRY_EXE, "run", "narrator", "publish-tiktok", slug],
+        cwd=r"C:\illustrated-narrator",
+    )
+    ok = proc.returncode == 0
+    return ok, (proc.stdout[-2000:] + proc.stderr[-1000:])
+
+
 def _delete_flagged_assets(slug: str, flagged: list[media_check.FlaggedShot]) -> None:
     project = NARRATOR_PROJECTS / slug
     for shot in flagged:
