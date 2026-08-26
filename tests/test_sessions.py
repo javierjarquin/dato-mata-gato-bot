@@ -93,3 +93,21 @@ def test_cierre_path_encuentra_cualquier_extension(tmp_path, monkeypatch):
     cierre_file.write_bytes(b"fake-png")
 
     assert sessions.cierre_path() == cierre_file
+
+
+def test_pending_batch_vacio_por_default(tmp_path, monkeypatch):
+    monkeypatch.setattr(sessions, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(sessions, "SESSIONS_PATH", tmp_path / "sessions.json")
+
+    assert sessions.get_pending_batch(444) == []
+
+
+def test_pending_batch_set_y_clear(tmp_path, monkeypatch):
+    monkeypatch.setattr(sessions, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(sessions, "SESSIONS_PATH", tmp_path / "sessions.json")
+
+    sessions.set_pending_batch(444, ["guion-a", "guion-b"])
+    assert sessions.get_pending_batch(444) == ["guion-a", "guion-b"]
+
+    sessions.clear_pending_batch(444)
+    assert sessions.get_pending_batch(444) == []

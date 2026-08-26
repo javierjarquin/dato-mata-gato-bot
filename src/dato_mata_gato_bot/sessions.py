@@ -122,6 +122,20 @@ def set_voice(chat_id: int, voice: str) -> None:
     _update(chat_id, voice=voice)
 
 
+def set_pending_batch(chat_id: int, slugs: list[str]) -> None:
+    """Slugs de un lote recién escrito por /nuevolote, pendientes de que el
+    usuario revise la veracidad antes de correr /generarlote sobre ellos."""
+    _update(chat_id, pending_batch=slugs)
+
+
+def get_pending_batch(chat_id: int) -> list[str]:
+    return get_chat_state(chat_id).get("pending_batch") or []
+
+
+def clear_pending_batch(chat_id: int) -> None:
+    _update(chat_id, pending_batch=[])
+
+
 def get_voice(chat_id: int) -> str:
     return get_chat_state(chat_id).get("voice") or DEFAULT_VOICE
 

@@ -14,6 +14,7 @@ en curso.
 """
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -77,6 +78,24 @@ INSTRUCCION_ESCALAR = (
     "C:\\dato-mata-gato-bot\\.venv\\Scripts\\python.exe -m dato_mata_gato_bot.upload_cli {slug}\n"
     "(desde cualquier carpeta -- ese comando ya arma el nombre progresivo y actualiza el "
     "calendario de publicación solo). Avisame cuando esté listo, o si algo no se puede resolver."
+)
+
+INSTRUCCION_NUEVO_LOTE = (
+    "Generá {n} guiones NUEVOS de casos reales de true crime mexicano para el canal, "
+    "siguiendo el mismo formato de guion.json y el mismo estilo/tono que los guiones ya "
+    "hechos. Antes de elegir los casos, revisá qué ya está cubierto (los guion.json en "
+    "C:\\Android_in\\ y los títulos ya publicados en "
+    "C:\\dato-mata-gato-bot\\data\\publish_schedule.json) para no repetir ninguno.\n\n"
+    "Para cada uno de los {n}:\n"
+    "1. Elegí un slug corto en minúsculas con guiones (ej. guion-nombre-caso).\n"
+    "2. Escribí el guion.json completo (planos, narración, visual, etc.) con los HECHOS "
+    "REALES del caso -- si no estás seguro de un dato puntual, no lo inventes.\n"
+    "3. Guardalo en C:\\Android_in\\<slug>\\guion.json.\n\n"
+    "Cuando termines los {n}, respondé ÚNICAMENTE con este bloque JSON, sin texto antes "
+    "ni después (se parsea automático):\n"
+    '{{"guiones": [{{"slug": "...", "titulo": "...", "resumen_hechos": "..."}}, ...]}}\n'
+    "\"resumen_hechos\" es para que el usuario pueda revisar la veracidad sin abrir cada "
+    "archivo -- 2-3 líneas con los datos centrales del caso (nombres, fechas, qué pasó)."
 )
 
 
@@ -189,6 +208,19 @@ HELP_TEXT = """Comandos disponibles — flujo típico: /nuevovideo → mandar gu
   vista previa acá. Sirve igual para sitios estáticos o SPAs de React.
   Ejemplo: /scrapear https://mi-sitio.com
 
+/nuevolote [cantidad]
+  Le pide a Claude (la misma conversación de este chat) que escriba varios guiones
+  nuevos de una, revisando qué casos ya están cubiertos para no repetir. No genera
+  ningún video todavía -- te manda título + resumen de hechos de cada uno para que
+  revises la veracidad antes de seguir. Default: 5.
+  Ejemplo: /nuevolote 3
+
+/generarlote
+  Corre /generar en cadena para cada guion del último /nuevolote, uno detrás del
+  otro. Si alguno no termina solo, lo escala a Claude igual que /generar y sigue
+  con el resto -- no se traba esperando a que se resuelva ese.
+  Ejemplo: /generarlote
+
 /nuevo
   Reinicia la conversación con Claude desde cero (borra la memoria del chat, no tus
   archivos ni proyectos).
@@ -216,6 +248,8 @@ BOT_COMMANDS = [
     ("cierre", "Mandar/actualizar el cartel de cierre del canal"),
     ("investigar", "Buscar imágenes libres [url, plano o palabras clave]"),
     ("scrapear", "POC: bajar imágenes/audio de una página [url]"),
+    ("nuevolote", "Pedirle a Claude varios guiones nuevos [cantidad]"),
+    ("generarlote", "Generar los videos del último /nuevolote"),
     ("nuevo", "Reiniciar la conversación con Claude"),
     ("ayuda", "Ver todos los comandos con ejemplos"),
 ]
@@ -305,6 +339,144 @@ async def cmd_generar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     )
     await _dispatch_to_claude(update, INSTRUCCION_ESCALAR.format(slug=slug, detalle=result.mensaje))
     sessions.set_phase(chat_id, sessions.PHASE_IDLE)
+
+
+_LOTE_DEFAULT = 5
+
+
+def _parse_lote_response(texto: str) -> list[dict] | None:
+    """Claude debería responder SOLO el bloque JSON pedido, pero a veces lo
+    envuelve en ```json ... ``` pese a la instrucción -- se pela eso antes
+    de parsear. None si no se pudo parsear nada usable."""
+    limpio = texto.strip()
+    if limpio.startswith("```"):
+        limpio = limpio.strip("`")
+        if limpio.lower().startswith("json"):
+            limpio = limpio[4:]
+        limpio = limpio.strip()
+    try:
+        data = json.loads(limpio)
+        guiones = data.get("guiones")
+        return guiones if isinstance(guiones, list) else None
+    except json.JSONDecodeError:
+        return None
+
+
+async def cmd_nuevolote(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Le pide a la MISMA sesión de Claude de este chat que escriba varios
+    guiones nuevos de una. No genera ningún video todavía -- eso es
+    /generarlote, después de que el usuario revise la veracidad de estos."""
+    chat_id = update.effective_chat.id
+    if not _authorized(chat_id):
+        await _reject_unauthorized(update)
+        return
+
+    n = _LOTE_DEFAULT
+    if context.args:
+        try:
+            n = int(context.args[0])
+        except ValueError:
+            await update.message.reply_text("Uso: /nuevolote [cantidad] (default 5)")
+            return
+
+    running, since = sessions.get_generating(chat_id)
+    if running:
+        await update.message.reply_text(f"Ya hay algo corriendo desde {since}.")
+        return
+
+    await update.message.reply_text(
+        f"Pidiéndole a Claude {n} guiones nuevos (revisando qué ya está cubierto para no "
+        f"repetir casos) -- puede tardar bastante, es investigar y escribir {n} guiones."
+    )
+    session_id, is_new = sessions.ensure_session_id(chat_id)
+    sessions.set_generating(chat_id, True)
+    try:
+        result = await asyncio.to_thread(
+            run_turn, session_id, INSTRUCCION_NUEVO_LOTE.format(n=n), is_new
+        )
+    finally:
+        sessions.set_generating(chat_id, False)
+
+    if not result.ok:
+        await update.message.reply_text(f"Falló: {result.text}")
+        return
+
+    guiones = _parse_lote_response(result.text)
+    if not guiones:
+        await update.message.reply_text(
+            "Claude terminó pero no pude parsear la lista de guiones de su respuesta. "
+            "Esto es lo que contestó:"
+        )
+        await _send_long(update, result.text)
+        return
+
+    slugs = [g["slug"] for g in guiones if g.get("slug")]
+    sessions.set_pending_batch(chat_id, slugs)
+
+    lineas = [f"Generó {len(slugs)} guion(es) nuevo(s) -- revisá la veracidad antes de generar los videos:\n"]
+    for g in guiones:
+        lineas.append(f"• {g.get('titulo', g.get('slug'))}\n  {g.get('resumen_hechos', '(sin resumen)')}")
+    lineas.append("\nCuando lo hayas revisado, corré /generarlote.")
+    await _send_long(update, "\n\n".join(lineas))
+
+
+async def cmd_generarlote(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Corre /generar en cadena para cada guion del último /nuevolote, uno
+    detrás del otro (no en paralelo -- A1111/GPU es compartido). Si un
+    video escala a Claude, no bloquea el lote: sigue con el siguiente y lo
+    reporta al final."""
+    chat_id = update.effective_chat.id
+    if not _authorized(chat_id):
+        await _reject_unauthorized(update)
+        return
+
+    slugs = sessions.get_pending_batch(chat_id)
+    if not slugs:
+        await update.message.reply_text("No hay ningún lote pendiente -- usa /nuevolote primero.")
+        return
+
+    running, since = sessions.get_generating(chat_id)
+    if running:
+        await update.message.reply_text(f"Ya hay algo corriendo desde {since}.")
+        return
+
+    voz = sessions.get_voice(chat_id)
+    await update.message.reply_text(
+        f"Arrancando el lote de {len(slugs)} video(s), uno detrás del otro. "
+        f"/estatus para ver en cuál va."
+    )
+
+    ok_list: list[str] = []
+    escalados: list[str] = []
+    fallidos: list[str] = []
+    for i, slug in enumerate(slugs, start=1):
+        await update.message.reply_text(f"({i}/{len(slugs)}) Generando '{slug}'...")
+        sessions.set_generating(chat_id, True)
+        try:
+            result = await asyncio.to_thread(pipeline.run, slug, voz, chat_id)
+        finally:
+            sessions.set_generating(chat_id, False)
+            sessions.set_progress(chat_id, None)
+
+        if result.ok:
+            ok_list.append(slug)
+            await update.message.reply_text(f"({i}/{len(slugs)}) '{slug}' listo: {result.mensaje}")
+        elif result.necesita_claude:
+            escalados.append(slug)
+            await update.message.reply_text(
+                f"({i}/{len(slugs)}) '{slug}' quedó sin terminar solo -- paso a Claude:\n{result.mensaje}"
+            )
+            await _dispatch_to_claude(update, INSTRUCCION_ESCALAR.format(slug=slug, detalle=result.mensaje))
+        else:
+            fallidos.append(slug)
+            await update.message.reply_text(f"({i}/{len(slugs)}) '{slug}' falló: {result.mensaje}")
+
+    sessions.clear_pending_batch(chat_id)
+    sessions.set_phase(chat_id, sessions.PHASE_IDLE)
+    await update.message.reply_text(
+        f"Lote terminado. OK sin Claude: {len(ok_list)}. Escalados a Claude: {len(escalados)}. "
+        f"Fallidos: {len(fallidos)}."
+    )
 
 
 async def cmd_investigar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -681,6 +853,8 @@ def main() -> None:
     app.add_handler(CommandHandler("videos", cmd_videos))
     app.add_handler(CommandHandler("investigar", cmd_investigar))
     app.add_handler(CommandHandler("scrapear", cmd_scrapear))
+    app.add_handler(CommandHandler("nuevolote", cmd_nuevolote))
+    app.add_handler(CommandHandler("generarlote", cmd_generarlote))
     app.add_handler(CommandHandler("voz", cmd_voz))
     app.add_handler(CommandHandler("logo", cmd_logo))
     app.add_handler(CommandHandler("cierre", cmd_cierre))
