@@ -72,13 +72,21 @@ El bot separa **recolectar archivos** (puro manejo de archivos, sin costo) de
   `/nuevolote`, uno detrás del otro (nunca en paralelo — la GPU es
   compartida). Si alguno no termina solo, lo escala a Claude y sigue con el
   resto sin trabarse.
+- `/publicarfacebook [slug]` / `/publicartiktok [slug]` — publican un video
+  YA GENERADO en Facebook o TikTok (Graph API / Content Posting API,
+  configuradas en `illustrated-narrator`). **Manuales a propósito** — todavía
+  no se disparan solos desde `/generar` ni `/generarlote`; primero se
+  prueban a mano, se conectan al pipeline automático después. TikTok queda
+  en modo privado (`SELF_ONLY`) hasta que TikTok audite la app — ver el
+  README de `illustrated-narrator` para el detalle de credenciales.
 
 El video final **no se manda por Telegram** (pesa ~200MB+, por encima del
 límite de 50MB para bots) — se sube directo a una carpeta de Google Drive,
 con nombre progresivo `<titulo>_<DDMMYYYY>.mp4` según el calendario de
-publicación (`/videos` lo muestra). El bot solo avisa por texto. Publicar
-ese video en YouTube/redes sigue siendo un paso manual — no hay integración
-con ninguna plataforma de publicación todavía.
+publicación (`/videos` lo muestra). El bot solo avisa por texto. Publicar en
+Facebook o TikTok ya tiene integración real (`/publicarfacebook`,
+`/publicartiktok`), pero disparada a mano — no hay ningún disparador
+automático todavía, y YouTube sigue sin ninguna integración.
 
 ## Instalación
 
