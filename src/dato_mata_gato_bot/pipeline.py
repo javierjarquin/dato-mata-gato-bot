@@ -342,6 +342,34 @@ def _delete_flagged_assets(slug: str, flagged: list[media_check.FlaggedShot]) ->
             video.unlink()
 
 
+_MENSAJE_TOKEN_DRIVE = (
+    "⚠️ El video de *{slug}* se generó bien, pero **caducó el token de Google Drive** "
+    "y no se pudo subir.\n\n"
+    "Esto lo tenés que hacer vos: reautorizar necesita abrir el navegador e iniciar "
+    "sesión en Google.\n\n"
+    "```\n"
+    "C:\\dato-mata-gato-bot\\.venv\\Scripts\\python.exe -m dato_mata_gato_bot.drive_auth\n"
+    "```\n\n"
+    "Imprime una URL: abrila, aceptá con la cuenta del canal, y volvé a correr el lote "
+    "(los videos ya generados no se rehacen).\n\n"
+    "Para que no se repita cada semana: en Google Cloud Console → Pantalla de "
+    "consentimiento de OAuth, pasá el estado de publicación de *Testing* a *In "
+    "production*. En Testing, Google caduca el token a los 7 días."
+)
+
+
+def _es_token_drive_vencido(exc: Exception) -> bool:
+    """El token de Drive caducó o fue revocado.
+
+    Con la app de OAuth en estado 'Testing', Google caduca los refresh tokens
+    a los 7 DÍAS exactos aunque se usen -- confirmado en una corrida real: el
+    token se generó el 27/08 22:23 y el lote del 03/09 falló entero, los cinco
+    videos, con `invalid_grant`.
+    """
+    texto = f"{type(exc).__name__}: {exc}".lower()
+    return "invalid_grant" in texto or "expired or revoked" in texto
+
+
 def _upload_to_drive(slug: str) -> str:
     # Leído en el momento (no como constante a nivel de módulo): bot.py
     # importa este módulo ANTES de llamar load_dotenv() (import primero,
@@ -431,6 +459,12 @@ def run(slug: str, voz: str, chat_id: int | None = None) -> PipelineResult:
     try:
         detalle = _upload_to_drive(slug)
     except Exception as exc:  # noqa: BLE001 — el video ya existe local, solo falló la subida
+        if _es_token_drive_vencido(exc):
+            # Escalarlo a Claude no sirve: reautorizar exige que una PERSONA
+            # abra el navegador e inicie sesión en Google. Se le avisa al
+            # usuario con el comando exacto, y necesita_claude=False para no
+            # gastar una corrida de Claude en algo que no puede resolver.
+            return PipelineResult(False, _MENSAJE_TOKEN_DRIVE.format(slug=slug))
         return PipelineResult(
             False, f"Video generado pero falló la subida a Drive:\n{exc}", necesita_claude=True
         )
