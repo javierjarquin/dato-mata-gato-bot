@@ -4,7 +4,12 @@ version = "0.1.0"
 description = "Puente Telegram <-> Claude Code para el pipeline de Dato Mata Gato (tts-kokoro + illustrated-narrator)."
 requires-python = ">=3.10"
 dependencies = [
-    "python-telegram-bot>=21.0",
+    # [job-queue] NO es opcional acá: sin ese extra app.job_queue es None y
+    # la publicación diaria automática nunca se dispara, sin error visible.
+    "python-telegram-bot[job-queue]>=21.0",
+    # zoneinfo en Windows no trae la base de zonas horarias: sin tzdata,
+    # ZoneInfo("America/Mexico_City") revienta al arrancar el bot.
+    "tzdata>=2024.1",
     "python-dotenv>=1.0",
     "requests>=2.31",
     "google-api-python-client>=2.100",

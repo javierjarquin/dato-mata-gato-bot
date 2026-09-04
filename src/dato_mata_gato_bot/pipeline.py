@@ -15,7 +15,7 @@ from pathlib import Path
 
 import requests
 
-from dato_mata_gato_bot import drive_upload, media_check, publish_schedule, sessions
+from dato_mata_gato_bot import drive_upload, media_check, publish_schedule, quiz_cards, sessions
 
 logger = logging.getLogger(__name__)
 
@@ -142,11 +142,23 @@ def _generate_audio(slug: str, voz: str, velocidad: float = 1.0) -> tuple[bool, 
     return True, proc.stdout
 
 
-def _apply_logo(dest_dir: Path) -> None:
+def _apply_logo(dest_dir: Path, guion: dict) -> None:
+    """Copia el logo del canal al plano de apertura, SI el guion tiene uno.
+    Desde el 27/08/2026 los guiones nuevos ya NO llevan plano de apertura
+    (el título del caso se narra al arranque de p01, sobre imagen real --
+    ver CLAUDE.md): en ese caso esto no hace nada. Se localiza el plano por
+    seccion=="identidad_apertura" y no por el id fijo "p00" porque sin plano
+    de identidad el id p00 pasa a ser el primer plano de contenido real, y
+    pisarle el logo encima le taparía la imagen del caso."""
     logo = sessions.logo_path()
     if not logo:
         return
-    target_dir = dest_dir / "media" / "p00"
+    plano = next(
+        (p for p in guion.get("planos", []) if p.get("seccion") == "identidad_apertura"), None
+    )
+    if plano is None:
+        return
+    target_dir = dest_dir / "media" / plano["id"]
     target_dir.mkdir(parents=True, exist_ok=True)
     # "elegido" SIN índice (no "elegido_1"): _manual_override en
     # research_plano_media.py prueba primero "elegido_<N>.*" por toma y
@@ -194,6 +206,45 @@ def _apply_manual_images(slug: str, dest_dir: Path) -> None:
         shutil.copy(f, target_dir / f"elegido_{indice}{f.suffix}")
 
 
+_PAUSA_MAX_SEG = 15.0
+
+
+def _pausa_despues_seg(plano: dict) -> float:
+    """Segundos de silencio a insertar DESPUÉS de este plano.
+
+    Habilita el formato de preguntas: la pregunta se queda en pantalla
+    mientras el espectador piensa, y recién después entra la respuesta.
+    Funciona sin tocar el ensamblador porque el clip de un plano dura hasta
+    el inicio del siguiente (ver render_timeline.py en illustrated-narrator),
+    así que el silencio se absorbe como tiempo en pantalla del plano previo.
+    """
+    try:
+        pausa = float(plano.get("pausa_despues_seg") or 0)
+    except (TypeError, ValueError):
+        logger.warning("pausa_despues_seg inválida en %s, se ignora", plano.get("id"))
+        return 0.0
+    if pausa <= 0:
+        return 0.0
+    return min(pausa, _PAUSA_MAX_SEG)
+
+
+def _generar_silencio(dest_dir: Path, plano_id: str, segundos: float) -> Path:
+    """WAV de silencio con el MISMO formato que los de Kokoro: el concat
+    demuxer de ffmpeg exige que todas las entradas coincidan en tasa de
+    muestreo y canales, si no falla o produce audio corrupto."""
+    silencios = dest_dir / "_silencios"
+    silencios.mkdir(parents=True, exist_ok=True)
+    destino = silencios / f"{plano_id}_pausa.wav"
+    proc = _run([
+        FFMPEG, "-y", "-f", "lavfi",
+        "-i", f"anullsrc=channel_layout=mono:sample_rate=24000",
+        "-t", f"{segundos:.3f}", "-acodec", "pcm_s16le", str(destino),
+    ])
+    if proc.returncode != 0:
+        raise RuntimeError(f"ffmpeg no pudo generar el silencio:\n{proc.stderr[-800:]}")
+    return destino
+
+
 def _setup_narrator_project(slug: str) -> None:
     src_guion = TTS_KOKORO_PROJECTS / slug / "guion.json"
     dest_dir = NARRATOR_PROJECTS / slug
@@ -201,14 +252,18 @@ def _setup_narrator_project(slug: str) -> None:
     shutil.copy(src_guion, dest_dir / "guion.json")
 
     guion = json.loads(src_guion.read_text(encoding="utf-8"))
-    plano_ids = [p["id"] for p in guion.get("planos", [])]
+    planos = guion.get("planos", [])
 
     wav_dir = TTS_KOKORO_PROJECTS / slug / "narracion"
     list_path = dest_dir / "_concat_list.txt"
     with list_path.open("w", encoding="utf-8") as f:
-        for pid in plano_ids:
-            wav = wav_dir / f"{pid}.wav"
+        for plano in planos:
+            wav = wav_dir / f"{plano['id']}.wav"
             f.write(f"file '{wav.as_posix()}'\n")
+            pausa = _pausa_despues_seg(plano)
+            if pausa:
+                silencio = _generar_silencio(dest_dir, plano["id"], pausa)
+                f.write(f"file '{silencio.as_posix()}'\n")
 
     narracion_wav = dest_dir / "narracion.wav"
     proc = _run([
@@ -219,9 +274,19 @@ def _setup_narrator_project(slug: str) -> None:
     if proc.returncode != 0:
         raise RuntimeError(f"ffmpeg concat falló:\n{proc.stderr[-1500:]}")
 
-    _apply_logo(dest_dir)
+    _apply_logo(dest_dir, guion)
     _apply_cierre(dest_dir, guion)
+    # Antes de _apply_manual_images: si el usuario subió una imagen a mano
+    # para un plano, esa gana sobre la tarjeta generada.
+    quiz_cards.generar_tarjetas(guion, dest_dir)
     _apply_manual_images(slug, dest_dir)
+
+    # Solo para guiones con pausas: ahí el alineador por Whisper se saltea
+    # tramos y deja planos sin renderizar (ver escribir_alineacion_exacta).
+    # Los guiones normales siguen usando la alineación por transcripción,
+    # que es la que tolera que el audio no coincida exactamente con el texto.
+    if any(_pausa_despues_seg(p) for p in planos):
+        quiz_cards.escribir_alineacion_exacta(guion, wav_dir, dest_dir)
 
 
 def _run_narrator_generate(slug: str) -> tuple[bool, str]:

@@ -62,5 +62,31 @@ def record_upload(slug: str, nombre_archivo: str, drive_link: str) -> None:
     _save(data)
 
 
+def record_facebook_publish(slug: str, post_id: str, url: str | None) -> None:
+    """Marca el slug como YA publicado en Facebook. Es lo que hace idempotente
+    a la publicación diaria: el bot se reinicia solo (acceso directo en Inicio
+    de Windows) y el job diario puede volver a dispararse el mismo día, así
+    que sin esta marca se publicaría el mismo video dos veces en la Página."""
+    data = _load()
+    entry = data.setdefault(slug, {})
+    entry["facebook_post_id"] = post_id
+    if url:
+        entry["facebook_url"] = url
+    entry["publicado_fb_en"] = datetime.now().isoformat(timespec="seconds")
+    _save(data)
+
+
+def ya_publicado_en_facebook(slug: str) -> bool:
+    return bool(_load().get(slug, {}).get("publicado_fb_en"))
+
+
+def slug_para_fecha(fecha_str: str) -> str | None:
+    """Slug al que le toca publicarse en esa fecha (DDMMYYYY), o None."""
+    for slug, entry in _load().items():
+        if entry.get("fecha") == fecha_str:
+            return slug
+    return None
+
+
 def all_entries() -> dict[str, dict]:
     return _load()

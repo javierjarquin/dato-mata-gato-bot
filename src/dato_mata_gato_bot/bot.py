@@ -18,9 +18,10 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from pathlib import Path
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
@@ -44,6 +45,7 @@ from telegram.ext import (  # noqa: E402
 
 from dato_mata_gato_bot import (  # noqa: E402
     auto_query,
+    daily_publish,
     free_image_search,
     generated_videos,
     image_naming,
@@ -68,6 +70,12 @@ VOICES = (
     "bm_george", "pm_santa", "pm_alex", "em_santa", "em_alex", "ef_dora",
 )
 
+# Publicación automática diaria: 20:00 hora de México (franja de mayor
+# consumo entre semana, elegida por el usuario). Con tzinfo explícito y no
+# la hora local del sistema: si la máquina cambiara de zona, la publicación
+# se correría sin que nadie se entere.
+HORA_PUBLICACION = time(20, 0, tzinfo=ZoneInfo("America/Mexico_City"))
+
 INSTRUCCION_ESCALAR = (
     "El pipeline automático (sin Claude) ya corrió para '{slug}' -- audio generado, "
     "proyecto armado en illustrated-narrator, y al menos una pasada de narrator generate "
@@ -90,12 +98,93 @@ INSTRUCCION_NUEVO_LOTE = (
     "1. Elegí un slug corto en minúsculas con guiones (ej. guion-nombre-caso).\n"
     "2. Escribí el guion.json completo (planos, narración, visual, etc.) con los HECHOS "
     "REALES del caso -- si no estás seguro de un dato puntual, no lo inventes.\n"
+    "   IMPORTANTE, formato de apertura nuevo (27/08/2026, ver CLAUDE.md): los guiones ya "
+    "NO llevan plano de identidad al arranque. NO generes ningún plano con "
+    "seccion=\"identidad_apertura\" ni con el logo del canal sobre negro. El p00 es "
+    "directamente el primer plano de CONTENIDO (el hook en segunda persona), y su narración "
+    "EMPIEZA con el título del caso, dicho tal cual, seguido del hook. Ejemplo: si el título "
+    "es \"No los mató el crimen organizado. Los mató la policía del estado.\", la narración de "
+    "p00 arranca con esa frase y sigue con \"Eres migrante centroamericano...\". Así el gancho "
+    "se escucha desde el segundo cero -- confirmado con prueba A/B real que la tarjeta de logo "
+    "al inicio le comía ~4.7s a la ventana de retención. El plano de CIERRE "
+    "(seccion=\"identidad_cierre\", con frase_cierre y el logo) SÍ se mantiene igual al final.\n"
+    "   TONO (cambio del 27/08/2026, decisión del usuario): se elimina la regla vieja de "
+    "\"tono contenido, nunca morboso\". Contá los hechos del caso de forma directa y concreta, "
+    "sin eufemismos ni rodeos -- si un hecho es brutal, se dice. NO generes reglas de "
+    "auto-censura de tono en 'regla_narracion' ni en 'verificar_antes_de_publicar'. La primera "
+    "frase de p00 debe ser el dato MÁS FUERTE del caso: el más indignante, incomprensible o "
+    "impactante -- el que obliga a quedarse a entender cómo pasó eso.\n"
+    "   Excepciones que SÍ se mantienen (no son tono, son riesgo concreto y verificable):\n"
+    "   a) De un suicidio o intento se puede contar TODO menos el método concreto: que "
+    "ocurrió, cuándo, en qué circunstancias, las secuelas, las señales previas, a quién le "
+    "pidió ayuda la persona y cómo fallaron las instituciones -- todo eso se narra sin "
+    "recortar. Lo único que se omite es CÓMO lo hizo (el medio o procedimiento), porque el "
+    "efecto de contagio por descripción de método está documentado y las plataformas lo "
+    "sancionan. No es suavizar el caso: es el único dato que no aporta comprensión. "
+    "Esto incluye NO decirlo en clave ni con eufemismos (tipo \"líquido rojo\" por sangre): "
+    "el eufemismo no reduce el riesgo -- el método se comunica igual -- las plataformas ya "
+    "detectan ese lenguaje, y suena a canal esquivando, que es lo contrario a la autoridad "
+    "factual que define a Dato Mata Gato.\n"
+    "   b) Caso Ingrid Escamilla y similares: NO describir el contenido de fotografías "
+    "filtradas de una víctima. En México la Ley Ingrid penaliza difundir ese material, y ese "
+    "caso trata justamente sobre el daño de haberlo difundido.\n"
+    "   c) NO generar imágenes de IA que representen a víctimas reales identificables ni "
+    "recreaciones de la escena del crimen. Eso no es narrar un hecho, es fabricar material "
+    "sobre una persona real. Las imágenes siguen siendo espacios/objetos, sin personas "
+    "identificables.\n"
     "3. Guardalo en C:\\Android_in\\<slug>\\guion.json.\n\n"
     "Cuando termines los {n}, respondé ÚNICAMENTE con este bloque JSON, sin texto antes "
     "ni después (se parsea automático):\n"
     '{{"guiones": [{{"slug": "...", "titulo": "...", "resumen_hechos": "..."}}, ...]}}\n'
     "\"resumen_hechos\" es para que el usuario pueda revisar la veracidad sin abrir cada "
     "archivo -- 2-3 líneas con los datos centrales del caso (nombres, fechas, qué pasó)."
+)
+
+
+INSTRUCCION_TRIVIA = (
+    "Generá {n} guiones NUEVOS de TRIVIA de cultura general para el canal, en el formato de "
+    "preguntas. Antes de elegir los temas, revisá los guion.json que ya están en "
+    "C:\\Android_in\\ para no repetir preguntas.\n\n"
+    "Para cada uno de los {n}:\n"
+    "1. Elegí un slug corto en minúsculas con guiones, empezando con 'trivia-' "
+    "(ej. trivia-geografia-01).\n"
+    "2. Escribí el guion.json completo. Usá C:\\Android_in\\guion-trivia-prueba\\guion.json "
+    "como plantilla exacta del formato.\n"
+    "3. Guardalo en C:\\Android_in\\<slug>\\guion.json.\n\n"
+    "ESTRUCTURA (3 preguntas, ~45 segundos en total):\n"
+    "- p00 seccion 'hook_preguntas': anuncia el reto Y el premio de quedarse hasta el final "
+    "(que la última es la difícil). NO lleva texto_grande: el gancho de apertura ya muestra "
+    "el título con el mismo estilo y se encimarían.\n"
+    "- Por cada pregunta, DOS planos: uno seccion 'pregunta' y otro seccion 'respuesta'.\n"
+    "- Anteúltimo plano seccion 'cierre_interaccion': pide un número concreto en los "
+    "comentarios.\n"
+    "- Último plano seccion 'identidad_cierre' con la frase_cierre del canal.\n"
+    "- NO generes ningún plano 'identidad_apertura'.\n\n"
+    "CAMPOS PROPIOS DE ESTE FORMATO:\n"
+    "- `pausa_despues_seg`: 2.5 en CADA plano de pregunta. Es el silencio para pensar; el "
+    "pipeline dibuja solo la cuenta regresiva 3-2-1 y le pone tic-tac.\n"
+    "- `texto_grande`: la pregunta completa (en los planos 'pregunta') o la respuesta en "
+    "mayúsculas y en pocas palabras (en los 'respuesta'). Va grande sobre la foto. "
+    "Máximo ~60 caracteres o se parte fea.\n"
+    "- `texto_en_pantalla`: rótulo chico arriba. Usalo para el marcador: '1 DE 3 · FÁCIL', "
+    "'VAS 1 DE 3', '2 DE 3 · MEDIA', etc.\n"
+    "- `audio.sfx`: 'reloj' en las preguntas (dispara el tic-tac) y 'campana' en las "
+    "respuestas.\n"
+    "- `visual.busqueda_medios`: en INGLÉS y con sustantivos CONCRETOS y fotografiables "
+    "('wide river aerial sunset', 'bat flying night sky'). Es lo que se busca en bancos de "
+    "imágenes reales: nada abstracto ni de marca, eso no existe como foto y falla.\n"
+    "  OJO: la foto de una PREGUNTA no debe revelar la respuesta. Si la pregunta es por un "
+    "animal que vuela de noche, poné cielo nocturno, no el animal.\n\n"
+    "RETENCIÓN (es lo que decide si el video funciona):\n"
+    "- Dificultad creciente, anunciada desde el primer segundo.\n"
+    "- Marcador que el espectador acumula entre pregunta y pregunta.\n"
+    "- Una frase que empuje a la siguiente ('si vas dos de dos, la que sigue duele').\n\n"
+    "Los datos tienen que ser CIERTOS y verificables. Si no estás seguro de uno, no lo uses.\n\n"
+    "Cuando termines los {n}, respondé ÚNICAMENTE con este bloque JSON, sin texto antes "
+    "ni después (se parsea automático):\n"
+    '{{"guiones": [{{"slug": "...", "titulo": "...", "resumen_hechos": "..."}}, ...]}}\n'
+    "\"resumen_hechos\": las 3 preguntas con su respuesta, para poder verificarlas sin abrir "
+    "el archivo."
 )
 
 
@@ -208,15 +297,22 @@ HELP_TEXT = """Comandos disponibles — flujo típico: /nuevovideo → mandar gu
   vista previa acá. Sirve igual para sitios estáticos o SPAs de React.
   Ejemplo: /scrapear https://mi-sitio.com
 
-/nuevolote [cantidad]
+/crimen [cantidad]
   Le pide a Claude (la misma conversación de este chat) que escriba varios guiones
-  nuevos de una, revisando qué casos ya están cubiertos para no repetir. No genera
-  ningún video todavía -- te manda título + resumen de hechos de cada uno para que
-  revises la veracidad antes de seguir. Default: 5.
-  Ejemplo: /nuevolote 3
+  nuevos de true crime mexicano, revisando qué casos ya están cubiertos para no
+  repetir. No genera ningún video todavía -- te manda título + resumen de hechos de
+  cada uno para que revises la veracidad antes de seguir. Default: 5.
+  Ejemplo: /crimen 3
+
+/trivia [cantidad]
+  Igual que /crimen pero en formato de preguntas: 3 preguntas de cultura general por
+  video, con pausa de suspenso, cuenta regresiva 3-2-1 con tic-tac, y cierre pidiendo
+  comentarios. Default: 5.
+  Ejemplo: /trivia 3
 
 /generarlote
-  Corre /generar en cadena para cada guion del último /nuevolote, uno detrás del
+  Corre /generar en cadena para cada guion del último lote (/crimen o /trivia), uno
+  detrás del
   otro. Si alguno no termina solo, lo escala a Claude igual que /generar y sigue
   con el resto -- no se traba esperando a que se resuelva ese.
   Ejemplo: /generarlote
@@ -260,8 +356,9 @@ BOT_COMMANDS = [
     ("cierre", "Mandar/actualizar el cartel de cierre del canal"),
     ("investigar", "Buscar imágenes libres [url, plano o palabras clave]"),
     ("scrapear", "POC: bajar imágenes/audio de una página [url]"),
-    ("nuevolote", "Pedirle a Claude varios guiones nuevos [cantidad]"),
-    ("generarlote", "Generar los videos del último /nuevolote"),
+    ("crimen", "Lote de guiones de true crime [cantidad]"),
+    ("trivia", "Lote de guiones de trivia/preguntas [cantidad]"),
+    ("generarlote", "Generar los videos del último lote"),
     ("publicarfacebook", "Publicar un video ya generado en Facebook [slug]"),
     ("publicartiktok", "Publicar un video ya generado en TikTok [slug]"),
     ("nuevo", "Reiniciar la conversación con Claude"),
@@ -376,10 +473,29 @@ def _parse_lote_response(texto: str) -> list[dict] | None:
         return None
 
 
-async def cmd_nuevolote(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_crimen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Lote de guiones de true crime mexicano. Uso: /crimen [cantidad]"""
+    await _pedir_lote(update, context, INSTRUCCION_NUEVO_LOTE, "de true crime")
+
+
+async def cmd_trivia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Lote de guiones de trivia en formato de preguntas. Uso: /trivia [cantidad]"""
+    await _pedir_lote(update, context, INSTRUCCION_TRIVIA, "de trivia")
+
+
+async def _pedir_lote(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    instruccion: str,
+    descripcion: str,
+) -> None:
     """Le pide a la MISMA sesión de Claude de este chat que escriba varios
     guiones nuevos de una. No genera ningún video todavía -- eso es
-    /generarlote, después de que el usuario revise la veracidad de estos."""
+    /generarlote, después de que el usuario revise la veracidad de estos.
+
+    Los dos tipos (crimen y trivia) comparten todo salvo la instrucción: el
+    lote queda igual en pending_batch y se genera con el mismo /generarlote.
+    """
     chat_id = update.effective_chat.id
     if not _authorized(chat_id):
         await _reject_unauthorized(update)
@@ -390,7 +506,9 @@ async def cmd_nuevolote(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         try:
             n = int(context.args[0])
         except ValueError:
-            await update.message.reply_text("Uso: /nuevolote [cantidad] (default 5)")
+            await update.message.reply_text(
+                f"Uso: {update.message.text.split()[0]} [cantidad] (default 5)"
+            )
             return
 
     running, since = sessions.get_generating(chat_id)
@@ -399,14 +517,15 @@ async def cmd_nuevolote(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
 
     await update.message.reply_text(
-        f"Pidiéndole a Claude {n} guiones nuevos (revisando qué ya está cubierto para no "
-        f"repetir casos) -- puede tardar bastante, es investigar y escribir {n} guiones."
+        f"Pidiéndole a Claude {n} guiones nuevos {descripcion} (revisando qué ya está "
+        f"cubierto para no repetir) -- puede tardar bastante, es investigar y escribir "
+        f"{n} guiones."
     )
     session_id, is_new = sessions.ensure_session_id(chat_id)
     sessions.set_generating(chat_id, True)
     try:
         result = await asyncio.to_thread(
-            run_turn, session_id, INSTRUCCION_NUEVO_LOTE.format(n=n), is_new
+            run_turn, session_id, instruccion.format(n=n), is_new
         )
     finally:
         sessions.set_generating(chat_id, False)
@@ -447,7 +566,7 @@ async def _safe_reply(update: Update, text: str) -> None:
 
 
 async def cmd_generarlote(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Corre /generar en cadena para cada guion del último /nuevolote, uno
+    """Corre /generar en cadena para cada guion del último lote, uno
     detrás del otro (no en paralelo -- A1111/GPU es compartido). Si un
     video escala a Claude, no bloquea el lote: sigue con el siguiente y lo
     reporta al final. Cada slug se saca de pending_batch apenas termina
@@ -461,7 +580,7 @@ async def cmd_generarlote(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     slugs = sessions.get_pending_batch(chat_id)
     if not slugs:
-        await update.message.reply_text("No hay ningún lote pendiente -- usa /nuevolote primero.")
+        await update.message.reply_text("No hay ningún lote pendiente -- usá /crimen o /trivia primero.")
         return
 
     running, since = sessions.get_generating(chat_id)
@@ -924,6 +1043,35 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _dispatch_to_claude(update, update.message.text)
 
 
+async def job_publicacion_diaria(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Publica en Facebook el video que toca hoy y avisa por Telegram.
+    Corre 20:00 hora de México (ver HORA_PUBLICACION). Es idempotente: si el
+    video de hoy ya se publicó, no hace nada -- el bot se relanza solo al
+    iniciar sesión de Windows y el job podría dispararse de nuevo el mismo
+    día. TikTok NO se automatiza (audit pendiente), solo se manda el
+    material listo para subirlo a mano."""
+    hoy = datetime.now(ZoneInfo(daily_publish.TIMEZONE)).date()
+    video = daily_publish.video_del_dia(hoy)
+    if video is None:
+        logger.info("Publicación diaria: nada agendado para %s", hoy)
+        return
+
+    # publicar_en_facebook hace I/O de red y subprocess: fuera del loop.
+    ok, texto = await asyncio.to_thread(daily_publish.publicar_en_facebook, video)
+    logger.info("Publicación diaria de %s: ok=%s", video.slug, ok)
+
+    if ok:
+        texto = f"{texto}\n\n{daily_publish.mensaje_tiktok(video)}"
+
+    for chat_id in ALLOWED_CHAT_IDS:
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id, text=texto, parse_mode=ParseMode.MARKDOWN
+            )
+        except Exception:  # noqa: BLE001 -- un chat caído no debe romper el resto
+            logger.exception("No se pudo avisar la publicación a %s", chat_id)
+
+
 def main() -> None:
     setup_logging(os.getenv("LOG_LEVEL", "INFO"))
 
@@ -950,7 +1098,11 @@ def main() -> None:
     app.add_handler(CommandHandler("videos", cmd_videos))
     app.add_handler(CommandHandler("investigar", cmd_investigar))
     app.add_handler(CommandHandler("scrapear", cmd_scrapear))
-    app.add_handler(CommandHandler("nuevolote", cmd_nuevolote))
+    app.add_handler(CommandHandler("crimen", cmd_crimen))
+    app.add_handler(CommandHandler("trivia", cmd_trivia))
+    # Alias del nombre viejo: sigue apuntando al lote de true crime para no
+    # romper la costumbre de quien ya lo usaba.
+    app.add_handler(CommandHandler("nuevolote", cmd_crimen))
     app.add_handler(CommandHandler("generarlote", cmd_generarlote))
     app.add_handler(CommandHandler("publicarfacebook", cmd_publicarfacebook))
     app.add_handler(CommandHandler("publicartiktok", cmd_publicartiktok))
@@ -961,6 +1113,17 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.Document.ALL, on_document))
     app.add_handler(MessageHandler(filters.PHOTO, on_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
+
+    app.job_queue.run_daily(
+        job_publicacion_diaria,
+        time=HORA_PUBLICACION,
+        name="publicacion_diaria",
+    )
+    logger.info(
+        "Publicación diaria agendada a las %s (%s)",
+        HORA_PUBLICACION.strftime("%H:%M"),
+        daily_publish.TIMEZONE,
+    )
 
     logger.info("Bot arrancado, escuchando Telegram (polling)...")
     app.run_polling()
