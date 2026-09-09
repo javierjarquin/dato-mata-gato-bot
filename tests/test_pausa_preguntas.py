@@ -43,3 +43,47 @@ def test_silencio_generado_coincide_con_el_formato_de_kokoro(tmp_path):
         assert w.getsampwidth() == 2  # 16 bits
         duracion = w.getnframes() / w.getframerate()
     assert abs(duracion - 2.0) < 0.05
+
+
+# --- motor de TTS: seleccion de voz y timeout ------------------------------
+
+def test_con_voicestudio_no_se_pasa_voz_de_kokoro(monkeypatch):
+    # El bot pasa siempre --voz con un nombre de Kokoro (am_adam). En
+    # VoiceStudio la voz es un profile_id de esa instancia: mandarle am_adam
+    # lo hace fallar. Se omite --voz para que use VOICESTUDIO_VOICE_ID.
+    monkeypatch.setenv("TTS_ENGINE", "voicestudio")
+    capturado = {}
+
+    def _fake_run(args, cwd=None, env=None, timeout=None):
+        capturado["args"] = args
+        capturado["timeout"] = timeout
+        return type("P", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(pipeline, "_run", _fake_run)
+    pipeline._generate_audio("slug-x", voz="am_adam")
+
+    assert "--voz" not in capturado["args"]
+    # Y con timeout propio: a 13x, un episodio largo no entra en el general.
+    assert capturado["timeout"] == pipeline.TIMEOUT_AUDIO_VOICESTUDIO
+
+
+def test_con_kokoro_se_sigue_pasando_la_voz(monkeypatch):
+    monkeypatch.setenv("TTS_ENGINE", "kokoro")
+    capturado = {}
+
+    def _fake_run(args, cwd=None, env=None, timeout=None):
+        capturado["args"] = args
+        capturado["timeout"] = timeout
+        return type("P", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(pipeline, "_run", _fake_run)
+    pipeline._generate_audio("slug-x", voz="am_adam")
+
+    assert "--voz" in capturado["args"]
+    assert capturado["args"][capturado["args"].index("--voz") + 1] == "am_adam"
+    assert capturado["timeout"] is None  # usa el general
+
+
+def test_el_timeout_de_audio_cubre_el_episodio_mas_largo():
+    # 604s es la narración más larga que existe en projects/.
+    assert 604 * 13 < pipeline.TIMEOUT_AUDIO_VOICESTUDIO

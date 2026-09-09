@@ -44,6 +44,8 @@ A1111_HEALTH_TIMEOUT = 3
 # subir el tope no vuelve el pipeline mucho más lento en el caso típico.
 MAX_AUTO_RETRIES = 10
 SUBPROCESS_TIMEOUT_SECONDS = 60 * 60 * 2
+# Solo para el paso de audio con VoiceStudio (ver _generate_audio).
+TIMEOUT_AUDIO_VOICESTUDIO = 60 * 60 * 6
 
 
 @dataclass
@@ -68,7 +70,13 @@ def _kill_process_tree(pid: int) -> None:
     )
 
 
-def _run(args: list[str], cwd: str | None = None, env: dict | None = None) -> subprocess.CompletedProcess:
+def _run(
+    args: list[str],
+    cwd: str | None = None,
+    env: dict | None = None,
+    timeout: int | None = None,
+) -> subprocess.CompletedProcess:
+    timeout = timeout or SUBPROCESS_TIMEOUT_SECONDS
     logger.info("Ejecutando: %s", " ".join(str(a) for a in args))
     proc = subprocess.Popen(
         args, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -83,7 +91,7 @@ def _run(args: list[str], cwd: str | None = None, env: dict | None = None) -> su
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
     try:
-        stdout, stderr = proc.communicate(timeout=SUBPROCESS_TIMEOUT_SECONDS)
+        stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
         # No se relanza el TimeoutExpired: antes se propagaba sin atrapar
         # hasta bot.py (pipeline.run no tiene try/except alrededor), lo que
@@ -93,7 +101,7 @@ def _run(args: list[str], cwd: str | None = None, env: dict | None = None) -> su
         # necesita_claude=True que ya usa cada otro fallo de este archivo.
         logger.error(
             "Timeout de %ds corriendo %s -- matando árbol de procesos (PID %d)",
-            SUBPROCESS_TIMEOUT_SECONDS, args[0], proc.pid,
+            timeout, args[0], proc.pid,
         )
         _kill_process_tree(proc.pid)
         stdout, stderr = proc.communicate()  # drena lo que ya estaba bufferizado
@@ -131,12 +139,32 @@ def _kick_off_a1111_if_needed() -> None:
         logger.warning("No se pudo arrancar A1111 (%s); el fallback de video-IA se saltará si hace falta", exc)
 
 
+def motor_tts() -> str:
+    """Motor de síntesis en uso. Lo lee del entorno igual que tts-kokoro, para
+    que el bot y el subproceso siempre coincidan."""
+    return (os.getenv("TTS_ENGINE") or "voicestudio").strip().lower()
+
+
 def _generate_audio(slug: str, voz: str, velocidad: float = 1.0) -> tuple[bool, str]:
     guion_path = TTS_KOKORO_PROJECTS / slug / "guion.json"
-    proc = _run([
+    args = [
         TTS_KOKORO_PY, "-m", "tts_kokoro.cli",
-        "--guion", str(guion_path), "--voz", voz, "--velocidad", str(velocidad),
-    ])
+        "--guion", str(guion_path), "--velocidad", str(velocidad),
+    ]
+    # `voz` es un nombre de voz de KOKORO (am_adam, em_santa...), que es lo que
+    # elige el usuario con /voz. En VoiceStudio la voz es un profile_id propio
+    # de esa instancia: pasarle un nombre de Kokoro lo haría fallar. Ahí se
+    # omite --voz a propósito para que el CLI use VOICESTUDIO_VOICE_ID.
+    if motor_tts() != "voicestudio":
+        args += ["--voz", voz]
+
+    # VoiceStudio sintetiza a ~13x el largo del audio (corre en CPU): el
+    # episodio más largo que hay hoy (604s de narración) tarda ~131 min y NO
+    # entra en el timeout general de 2h -- se cortaría a mitad y escalaría a
+    # Claude por un fallo que no es tal. Kokoro va más rápido que tiempo real
+    # y no necesita este margen.
+    timeout = TIMEOUT_AUDIO_VOICESTUDIO if motor_tts() == "voicestudio" else None
+    proc = _run(args, timeout=timeout)
     if proc.returncode != 0:
         return False, f"tts-kokoro falló:\n{proc.stderr[-1500:]}"
     return True, proc.stdout
@@ -413,7 +441,10 @@ def run(slug: str, voz: str, chat_id: int | None = None) -> PipelineResult:
     _stage_guion_for_tts(slug)
     _kick_off_a1111_if_needed()
 
-    progreso("generando audio (tts-kokoro)")
+    # Con VoiceStudio esto tarda ~13x el largo del audio (CPU), asi que el
+    # aviso dice QUE motor esta corriendo: si no, un lote de 2 horas parece
+    # colgado y encima nombrando al motor equivocado.
+    progreso(f"generando audio ({motor_tts()})")
     ok, out = _generate_audio(slug, voz)
     if not ok:
         return PipelineResult(False, out, necesita_claude=True)
