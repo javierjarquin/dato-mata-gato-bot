@@ -213,8 +213,14 @@ def escribir_alineacion_exacta(guion: dict, wav_dir: Path, dest_dir: Path) -> in
 
 
 def _pausa_de(plano: dict) -> float:
+    """Misma lectura que pipeline._pausa_despues_seg: en el plano o dentro de
+    "audio". Si los dos leyeran distinto, el audio tendría la pausa y los
+    tiempos de los planos no, y los subtítulos quedarían corridos."""
+    crudo = plano.get("pausa_despues_seg")
+    if crudo is None:
+        crudo = (plano.get("audio") or {}).get("pausa_despues_seg")
     try:
-        return max(0.0, float(plano.get("pausa_despues_seg") or 0))
+        return max(0.0, float(crudo or 0))
     except (TypeError, ValueError):
         return 0.0
 

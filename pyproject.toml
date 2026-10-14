@@ -16,6 +16,8 @@ dependencies = [
     "google-auth-httplib2>=0.2",
     "google-auth-oauthlib>=1.2",
     "playwright>=1.40",
+    # Páginas de PDF (recomendaciones de la CNDH, sentencias) como evidencia.
+    "pymupdf>=1.24",
 ]
 
 [project.optional-dependencies]

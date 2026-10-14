@@ -27,11 +27,13 @@ def test_format_video_list_vacio():
 
 def test_format_video_list_con_datos(tmp_path, monkeypatch):
     monkeypatch.setattr(publish_schedule, "SCHEDULE_PATH", tmp_path / "publish_schedule.json")
-    publish_schedule.assign_date("elchalequero")
-    publish_schedule.record_upload("elchalequero", "elchalequero_25082026.mp4", "https://drive/x")
+    fecha = publish_schedule.assign_date("elchalequero")
+    publish_schedule.record_upload("elchalequero", f"elchalequero_{fecha}.mp4", "https://drive/x")
 
     texto = generated_videos.format_video_list(generated_videos.list_generated_videos())
     assert "1 video(s)" in texto
-    assert "elchalequero_25082026.mp4" in texto
-    assert "25/08/2026" in texto
+    assert f"elchalequero_{fecha}.mp4" in texto
+    # Derivada del ancla, no escrita a mano: el ancla se movió una vez (uno por
+    # día desde el 25/08 -> 5 por día desde el 12/09) y puede volver a moverse.
+    assert f"{fecha[:2]}/{fecha[2:4]}/{fecha[4:]}" in texto
     assert "subido" in texto

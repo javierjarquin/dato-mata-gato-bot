@@ -3,6 +3,7 @@ proyecto, sesión de Claude Code asociada, y si hay una generación en
 curso. Persistido en disco para sobrevivir reinicios del bot."""
 
 import json
+import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -52,6 +53,11 @@ def ensure_session_id(chat_id: int) -> tuple[str, bool]:
     """Devuelve (session_id, es_nueva). Genera una sesión nueva la primera
     vez que este chat escribe; la reutiliza después."""
     state = get_chat_state(chat_id)
+    if state.get("session_nueva") and "session_id" in state:
+        # Recién rotada por nueva_sesion_claude: todavía no existe para
+        # Claude, así que hay que crearla, no retomarla.
+        _update(chat_id, session_nueva=False)
+        return state["session_id"], True
     if "session_id" in state:
         return state["session_id"], False
     session_id = str(uuid.uuid4())
@@ -93,12 +99,125 @@ def set_generating(chat_id: int, running: bool) -> None:
         chat_id,
         generating=running,
         generating_since=(datetime.now(timezone.utc).isoformat() if running else None),
+        # Quién genera: el bot o tools/retomar_lote.py, que es otro proceso.
+        # Ver limpiar_generaciones_colgadas.
+        generating_pid=(os.getpid() if running else None),
     )
+
+
+def _proceso_vivo(pid) -> bool:
+    """¿Sigue corriendo ese proceso? Sin dependencias: en Windows se le
+    pregunta a kernel32 por su código de salida (259 = todavía activo)."""
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+    import ctypes
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return False
+    try:
+        codigo = ctypes.c_ulong()
+        kernel32.GetExitCodeProcess(handle, ctypes.byref(codigo))
+        return codigo.value == 259
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def get_generating(chat_id: int) -> tuple[bool, str | None]:
     state = get_chat_state(chat_id)
     return bool(state.get("generating")), state.get("generating_since")
+
+
+def set_tramos_faltantes(chat_id: int, tramos: list[tuple[str, str, int]]) -> None:
+    """Los tramos de un lote que no llegaron a escribirse, para /completarlote."""
+    _update(chat_id, tramos_faltantes=[list(t) for t in tramos])
+
+
+def get_tramos_faltantes(chat_id: int) -> list[tuple[str, str, int]]:
+    return [tuple(t) for t in (get_chat_state(chat_id).get("tramos_faltantes") or [])]
+
+
+def nueva_sesion_claude(chat_id: int) -> str:
+    """Empieza una conversación nueva con Claude para el chat, SIN tocar el
+    resto del estado (lote pendiente, slug, voz). reset_session() borra todo."""
+    session_id = str(uuid.uuid4())
+    _update(chat_id, session_id=session_id, session_nueva=True)
+    return session_id
+
+
+def set_pausa(chat_id: int, pausado: bool) -> None:
+    """Pide que el lote se detenga en el corte entre videos (o lo reanuda).
+
+    Es una bandera en disco y no una variable en memoria a propósito: el que
+    la lee es el bucle del lote, que puede estar a media hora de distancia de
+    la orden, y el que la escribe es el manejador de /pausa.
+    """
+    _update(chat_id, pausa=pausado)
+
+
+def get_pausa(chat_id: int) -> bool:
+    return bool(get_chat_state(chat_id).get("pausa"))
+
+
+def set_lote_sin_avatar(chat_id: int, sin_avatar: bool) -> None:
+    """Marca el lote pendiente como "sin presentador" (lo escribe /lotefish3).
+
+    El presentador es la cara de Javier con su voz; los videos de /lotefish3
+    van con la voz de Fish 3 y el logo fijo, y un presentador en medio del lote
+    rompería justo eso. Va en disco porque quien lo lee es /generargrande,
+    que se corre después (a veces al día siguiente).
+    """
+    _update(chat_id, lote_sin_avatar=sin_avatar)
+
+
+def get_lote_sin_avatar(chat_id: int) -> bool:
+    return bool(get_chat_state(chat_id).get("lote_sin_avatar"))
+
+
+def limpiar_generaciones_colgadas() -> list[str]:
+    """Apaga la bandera `generating` de todos los chats. Se llama al arrancar.
+
+    La bandera se apaga en un `finally` DENTRO del proceso que genera, así que
+    si el proceso muere (lo matamos, se reinicia la máquina, se corta la luz)
+    queda encendida para siempre y el bot no vuelve a arrancar nada: todos los
+    comandos salen por "Ya hay algo corriendo desde ...".
+
+    Pasó de verdad el 20/09/2026: se cortó un lote a mano y dos días después
+    /lotegrande seguía rebotando con un `generating_since` de cuarenta horas
+    antes. Como el pipeline corre DENTRO de este proceso (asyncio.to_thread),
+    que el bot esté arrancando ya prueba que no hay nada corriendo -- así que
+    apagarlas acá es correcto, no un parche.
+
+    Devuelve los chats que estaban colgados, para dejarlo en el log.
+    """
+    data = _load()
+    # Salvo que el que genera sea OTRO proceso que sigue vivo: desde que existe
+    # tools/retomar_lote.py, un lote puede correr desde la consola mientras el
+    # bot se reinicia. Antes se apagaba la bandera igual, y el bot quedaba
+    # libre para arrancar un segundo lote encima -- dos corridas peleando por
+    # los mismos 8 GB de la placa.
+    colgados = [k for k, v in data.items()
+                if v.get("generating")
+                and not (v.get("generating_pid") != os.getpid()
+                         and _proceso_vivo(v.get("generating_pid")))]
+    for key in colgados:
+        data[key]["generating"] = False
+        data[key]["generating_since"] = None
+        data[key]["progress"] = None
+    # La pausa tampoco sobrevive al reinicio: el bucle que la esperaba ya no
+    # existe, y dejarla puesta haría que el próximo lote arrancara frenado.
+    pausados = [k for k, v in data.items() if v.get("pausa")]
+    for key in pausados:
+        data[key].pop("pausa", None)
+    if colgados or pausados:
+        _save(data)
+    return colgados
 
 
 def set_progress(chat_id: int, paso: str) -> None:
@@ -181,6 +300,20 @@ def cierre_path() -> Path | None:
     return None
 
 
+def cierre_mito_path() -> Path | None:
+    """El cartel de cierre de los mitos, si existe (tools/cartel_cierre_mito.py).
+
+    Mismo cartel del canal pero sin la palabra "caso": "¿CONOCÍAS ESTA
+    LEYENDA?" en vez de "¿QUÉ OPINAS DE ESTE CASO?". El glob no choca con
+    cierre_path(): "dato_mata_gato_cierre.*" no incluye "..._cierre_mito.png".
+    """
+    if not LOGO_DIR.exists():
+        return None
+    for p in LOGO_DIR.glob(f"{CIERRE_STEM}_mito.*"):
+        return p
+    return None
+
+
 def manual_images_dir_for(slug: str) -> Path:
     """Carpeta donde se acumulan las imagenes que el usuario manda ANTES
     de /generar -- Claude las mueve a media/<plano>/elegido_N.* siguiendo
@@ -188,3 +321,20 @@ def manual_images_dir_for(slug: str) -> Path:
     d = ANDROID_IN / slug / "imagenes_manuales"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def set_preguntas_pendientes(chat_id: int, preguntas: list[dict]) -> None:
+    """Preguntas que Claude propuso y que el usuario todavía no aprobó.
+
+    Viven en la sesión y no en el banco a propósito: al banco solo entra lo
+    aprobado, que es lo que hace que el generador nunca arme un video con un
+    dato que nadie miró."""
+    _update(chat_id, preguntas_pendientes=preguntas)
+
+
+def get_preguntas_pendientes(chat_id: int) -> list[dict]:
+    return get_chat_state(chat_id).get("preguntas_pendientes") or []
+
+
+def clear_preguntas_pendientes(chat_id: int) -> None:
+    _update(chat_id, preguntas_pendientes=[])

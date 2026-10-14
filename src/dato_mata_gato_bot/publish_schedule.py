@@ -1,16 +1,27 @@
 """Calendario de publicación progresivo -- puro código, sin Claude.
 
-Cada slug NUEVO toma el día siguiente al último ya asignado (días de
-calendario consecutivos, arrancando en ANCHOR_DATE). Reintentos del mismo
-slug (ej. Claude corrige y vuelve a subir) NO consumen una fecha nueva --
-assign_date es idempotente por slug.
+Desde el 12/09/2026 la modalidad es de POR_DIA videos por día: cada slug nuevo
+va al primer día con cupo libre a partir de ANCLA_ACTUAL. Antes de eso era uno
+por día, arrancando en ANCHOR_DATE.
+
+Reintentos del mismo slug (ej. Claude corrige y vuelve a subir) NO consumen una
+fecha nueva -- assign_date es idempotente por slug.
 """
 
 import json
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-ANCHOR_DATE = date(2026, 8, 25)  # martes 25/08/2026
+ANCHOR_DATE = date(2026, 8, 25)  # martes 25/08/2026 -- ancla de la modalidad vieja
+
+# Modalidad nueva: 5 videos por día, arrancando el 12/09/2026. Las entradas
+# anteriores quedan como están (ya se publicaron) y NO cuentan para el cupo: se
+# distinguen porque no llevan el campo `modalidad`. Sin esa distinción, un slug
+# nuevo caería en los días sueltos que dejó el calendario viejo.
+ANCLA_ACTUAL = date(2026, 9, 12)
+POR_DIA = 5
+MODALIDAD = f"{POR_DIA}-por-dia"
+
 SCHEDULE_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "publish_schedule.json"
 
 
@@ -34,19 +45,37 @@ def _last_date(data: dict[str, dict]) -> date | None:
     return max(fechas) if fechas else None
 
 
+def _ocupacion(data: dict[str, dict]) -> dict[str, int]:
+    """Cuántos slugs de la modalidad actual hay en cada fecha."""
+    cuenta: dict[str, int] = {}
+    for entry in data.values():
+        if entry.get("modalidad") == MODALIDAD and entry.get("fecha"):
+            cuenta[entry["fecha"]] = cuenta.get(entry["fecha"], 0) + 1
+    return cuenta
+
+
+def _primer_dia_con_cupo(data: dict[str, dict]) -> date:
+    cuenta = _ocupacion(data)
+    dia = ANCLA_ACTUAL
+    while cuenta.get(dia.strftime("%d%m%Y"), 0) >= POR_DIA:
+        dia += timedelta(days=1)
+    return dia
+
+
 def assign_date(slug: str) -> str:
-    """Fecha (DDMMYYYY) asignada a este slug -- idempotente: si ya tenía
-    una, la devuelve tal cual; si es nuevo, toma el día siguiente al
-    último asignado (o el ancla, si es el primero de todos)."""
+    """Fecha (DDMMYYYY) asignada a este slug -- idempotente: si ya tenía una, la
+    devuelve tal cual; si es nuevo, va al primer día con cupo desde ANCLA_ACTUAL."""
     data = _load()
     entry = data.get(slug)
     if entry and entry.get("fecha"):
         return entry["fecha"]
 
-    last = _last_date(data)
-    next_date = (last + timedelta(days=1)) if last else ANCHOR_DATE
-    fecha_str = next_date.strftime("%d%m%Y")
-    data.setdefault(slug, {})["fecha"] = fecha_str
+    fecha_str = _primer_dia_con_cupo(data).strftime("%d%m%Y")
+    nueva = data.setdefault(slug, {})
+    nueva["fecha"] = fecha_str
+    # Marca la modalidad con la que se asignó: es lo que separa estas entradas
+    # de las del calendario viejo a la hora de contar el cupo del día.
+    nueva["modalidad"] = MODALIDAD
     _save(data)
     return fecha_str
 
@@ -80,13 +109,33 @@ def ya_publicado_en_facebook(slug: str) -> bool:
     return bool(_load().get(slug, {}).get("publicado_fb_en"))
 
 
+def slugs_para_fecha(fecha_str: str) -> list[str]:
+    """Slugs agendados para esa fecha (DDMMYYYY). Con la modalidad de POR_DIA
+    por día pueden ser varios."""
+    return [slug for slug, entry in _load().items() if entry.get("fecha") == fecha_str]
+
+
 def slug_para_fecha(fecha_str: str) -> str | None:
-    """Slug al que le toca publicarse en esa fecha (DDMMYYYY), o None."""
-    for slug, entry in _load().items():
-        if entry.get("fecha") == fecha_str:
-            return slug
-    return None
+    """El primero de los agendados para esa fecha, o None.
+
+    Se conserva para el job diario, que publica de a uno. Con varios el mismo
+    día devuelve solo el primero: usá slugs_para_fecha() si los querés todos."""
+    slugs = slugs_para_fecha(fecha_str)
+    return slugs[0] if slugs else None
 
 
 def all_entries() -> dict[str, dict]:
     return _load()
+
+
+def contar_por_tipo() -> dict[str, int]:
+    """Cuántos videos de cada tipo hay agendados en la modalidad actual.
+
+    Se cuenta sobre el calendario y no sobre los lotes pedidos, así el reparto
+    se corrige solo si un lote se generó a medias."""
+    cuenta = {"crimen": 0, "trivia": 0}
+    for slug, entry in _load().items():
+        if entry.get("modalidad") != MODALIDAD:
+            continue
+        cuenta["trivia" if slug.startswith("trivia-") else "crimen"] += 1
+    return cuenta
