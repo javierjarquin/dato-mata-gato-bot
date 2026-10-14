@@ -91,7 +91,30 @@ def test_con_animaciones_usa_render_plus_y_devuelve_el_resumen(tmp_path, monkeyp
         (tmp_path / "rem" / "out" / "guion-a_plus.mp4").write_bytes(b"r" * 200_000)
         return Proc()
     monkeypatch.setattr(pipeline.subprocess, "run", correr)
+    monkeypatch.setattr(pipeline, "_juntar_multimedia", lambda slug: "")
+    monkeypatch.setattr(pipeline, "_portadas", lambda slug, final: "portada A (la nota) en el primer cuadro")
     ok, detalle = pipeline.render_remotion("guion-a")
     assert ok and visto["script"].endswith("render_plus.py")
-    assert detalle.startswith("plus: 6 fichas")
+    assert detalle.startswith("plus: 6 fichas") and "portada A (la nota)" in detalle
     assert (tmp_path / "proj" / "guion-a" / "final.mp4").exists()
+
+
+def test_portada_por_defecto_es_la_nota(monkeypatch):
+    monkeypatch.delenv("PORTADA_VARIANTE", raising=False)
+    assert {pipeline.variante_portada(f"guion-cancun-caso-{i}") for i in range(10)} == {"nota"}
+    monkeypatch.setenv("PORTADA_VARIANTE", "dato")
+    assert pipeline.variante_portada("guion-x") == "dato"
+
+
+def test_archivar_copia_las_portadas(tmp_path, monkeypatch):
+    proyecto = tmp_path / "proj" / "guion-a"
+    proyecto.mkdir(parents=True)
+    (proyecto / "guion.json").write_text('{"titulo": "Playas públicas"}', encoding="utf-8")
+    (proyecto / "final.mp4").write_bytes(b"v")
+    (proyecto / "portada_nota.jpg").write_bytes(b"a")
+    (proyecto / "portada_dato.jpg").write_bytes(b"b")
+    monkeypatch.setattr(pipeline, "NARRATOR_PROJECTS", tmp_path / "proj")
+    destino = pipeline._archivar_local("guion-a", proyecto / "final.mp4", tmp_path / "lote")
+    assert destino.exists()
+    assert (destino.with_name(f"{destino.stem}_portada_nota.jpg")).read_bytes() == b"a"
+    assert (destino.with_name(f"{destino.stem}_portada_dato.jpg")).read_bytes() == b"b"

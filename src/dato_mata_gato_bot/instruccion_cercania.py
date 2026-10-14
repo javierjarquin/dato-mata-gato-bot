@@ -184,7 +184,7 @@ del tema (minúsculas y guiones). Así, como en este ejemplo real (recortado a 2
 "claves": 1 a 3 palabras que el titular de cada nota de prensa contiene (sin acentos sirve).
 "texto_en_pantalla": 2 a 5 palabras en mayúsculas.
 
-"plus" (en la raíz del guion): tres animaciones que se arman con datos que YA están en el
+"plus" (en la raíz del guion): animaciones que se arman con datos que YA están en el
 guion y ya verificaste. NADA nuevo: cada cifra y cada frase tiene que estar en la narración
 o en una ficha. Si una no aplica, omítela (no la inventes).
   "contador": la cifra del gancho, si p00 dice una: {"numero": 40, "antes": "HASTA",
@@ -200,6 +200,9 @@ o en una ficha. Si una no aplica, omítela (no la inventes).
      2 o 3 renglones cortos por bloque (máximo 36 letras cada uno). "abajo_en": la palabra
      de la narración de ESE plano donde empieza la parte de abajo. "resaltar": un renglón
      de "abajo", copiado igual.
+  "archivo": 1 o 2 búsquedas EN INGLÉS para tomas de video de archivo del lugar (Pexels):
+     ["Cancun beach", "Playa del Carmen street"]. Solo ambiente del lugar, nunca personas
+     del caso: en pantalla salen marcadas como archivo.
 
 AL TERMINAR responde SOLO este bloque JSON:
 {"guiones": [{"slug": "...", "titulo": "...", "resumen_hechos": "2 líneas con los hechos y sus fuentes"}]}

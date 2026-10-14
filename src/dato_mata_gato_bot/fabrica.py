@@ -171,6 +171,33 @@ def telegram(texto: str, video: Path | None = None) -> None:
             time.sleep(5)
 
 
+def telegram_fotos(fotos: list[tuple[Path, str]]) -> None:
+    """Varias fotos en un solo mensaje (las portadas del video, 14/10/2026)."""
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat = (os.getenv("TELEGRAM_ALLOWED_CHAT_IDS") or "").split(",")[0].strip()
+    fotos = [(r, c) for r, c in fotos if r.exists()]
+    if not (token and chat and fotos):
+        return
+    media = [{"type": "photo", "media": f"attach://f{i}", "caption": c} for i, (_, c) in enumerate(fotos)]
+    for _ in range(3):
+        archivos = {f"f{i}": open(r, "rb") for i, (r, _) in enumerate(fotos)}
+        try:
+            if len(fotos) == 1:  # sendMediaGroup pide de 2 a 10 fotos
+                requests.post(f"https://api.telegram.org/bot{token}/sendPhoto",
+                              data={"chat_id": chat, "caption": fotos[0][1]},
+                              files={"photo": archivos["f0"]}, timeout=300)
+            else:
+                requests.post(f"https://api.telegram.org/bot{token}/sendMediaGroup",
+                              data={"chat_id": chat, "media": json.dumps(media)}, files=archivos, timeout=300)
+            return
+        except Exception as exc:  # noqa: BLE001 -- un aviso nunca tira la fábrica
+            logger.warning("Telegram fotos: %s", exc)
+            time.sleep(5)
+        finally:
+            for f in archivos.values():
+                f.close()
+
+
 class _Avisador:
     """Lo único que usan del `update` de Telegram las funciones del bot que
     escriben y revisan guiones es `update.message.reply_text`."""
@@ -572,6 +599,12 @@ def video(lote: str, slug: str) -> None:
         etiqueta = {"noticia": "📰 NOTICIA: publícala pronto, caduca", "perenne": "🌲 PERENNE"}.get(vig, "")
         telegram(f"🎬 {slug} ({(time.time() - inicio) / 60:.0f} min)" + (f"\n{etiqueta}" if etiqueta else "")
                  + f"\n{r.mensaje[-700:]}", liviano if liviano.exists() else None)
+        # La portada (estilo A, la nota) para subirla al publicar; ya va en el primer cuadro.
+        proyecto = pipeline.NARRATOR_PROJECTS / slug
+        pegada = pipeline.variante_portada(slug)
+        telegram_fotos([(proyecto / f"portada_{v}.jpg",
+                         "Portada"
+                         + (" (ya va en el primer cuadro)" if v == pegada else "")) for v in ("nota", "dato")])
         limpiar(slug, liviano)
     print("RESULTADO " + json.dumps({"ok": r.ok, "mensaje": r.mensaje[-1500:]}, ensure_ascii=False),
           flush=True)

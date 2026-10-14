@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 import zlib
 from dataclasses import dataclass, field
@@ -1016,6 +1017,7 @@ def render_remotion(slug: str) -> tuple[bool, str]:
     plus = render_plus()
     script = "render_plus.py" if plus else "render_capitulo.py"
     salida = REMOTION_DIR / "out" / (f"{slug}_plus.mp4" if plus else f"{slug}.mp4")
+    aviso_medios = _juntar_multimedia(slug) if plus else ""
     try:
         proc = subprocess.run(
             [NARRATOR_PY, str(REMOTION_DIR / "scripts" / script), slug],
@@ -1038,7 +1040,100 @@ def render_remotion(slug: str) -> tuple[bool, str]:
     shutil.move(str(salida), str(final))
     # La línea "plus: ..." dice qué animaciones entraron (va al aviso de Telegram).
     resumen = next((l for l in proc.stdout.splitlines() if l.startswith("plus: ") and "fichas" in l), "")
+    if plus:
+        resumen = "; ".join(x for x in (resumen, aviso_medios, _portadas(slug, final)) if x)
     return True, resumen or proc.stdout[-300:]
+
+
+# --- Evidencia en movimiento y portadas (14/10/2026) ------------------------
+
+TIMEOUT_MULTIMEDIA = 10 * 60
+# Tomas de archivo (Pexels) por tema, si el guion no trae "plus.archivo".
+ARCHIVO_POR_TEMA = {"cancun": ["Cancun beach", "Cancun hotel zone"],
+                    "cdmx": ["Mexico City street", "Mexico City traffic"]}
+
+
+def _juntar_multimedia(slug: str) -> str:
+    """Notas animadas, fotos de las notas y tomas de archivo (poc_remotion/
+    scripts/multimedia.py, con el Python del bot porque trae Playwright).
+    Javier: "los videos son muy planos y es solo texto". Si falla, el render
+    sale igual sin eso."""
+    try:
+        guion = json.loads((ANDROID_IN / slug / "guion.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    consultas = list((guion.get("plus") or {}).get("archivo") or [])
+    tema = slug.split("-")[1] if slug.count("-") >= 2 else ""
+    consultas = consultas or ARCHIVO_POR_TEMA.get(tema, [])
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(REMOTION_DIR / "scripts" / "multimedia.py"), slug, "--archivo", *consultas],
+            cwd=REMOTION_DIR, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=TIMEOUT_MULTIMEDIA, env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except subprocess.TimeoutExpired:
+        return "multimedia: se pasó de 10 min, sin notas animadas"
+    if proc.returncode != 0:
+        logger.warning("multimedia %s falló: %s", slug, (proc.stderr or proc.stdout)[-800:])
+        return "multimedia: falló, sin notas animadas"
+    return ""
+
+
+def variante_portada(slug: str) -> str:
+    """Estilo de la portada. Javier eligió la A, "la nota" (14/10/2026): el
+    titular real como recorte de periódico y la cifra abajo. PORTADA_VARIANTE=dato
+    cambia a la B. Si el video no tiene nota con captura, portada.py arma la B
+    sola (es la misma imagen sin el recorte)."""
+    return (os.getenv("PORTADA_VARIANTE") or "nota").strip().lower()
+
+
+def _pegar_portada(final: Path, portada: Path) -> bool:
+    """La portada como PRIMER cuadro (1/30 s): TikTok usa el primer cuadro si
+    no se elige otra, y en Remotion ahí el contador estaba en 0 ("QUEDAN 0")."""
+    tmp = final.with_name("final_con_portada.mp4")
+    r = subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-loop", "1", "-framerate", "30", "-t", "0.0334", "-i", str(portada),
+         "-f", "lavfi", "-t", "0.0334", "-i", "anullsrc=r=48000:cl=stereo", "-i", str(final),
+         "-filter_complex", "[0:v]scale=1080:1920,setsar=1,fps=30,format=yuv420p[c];"
+         "[2:v]setsar=1,fps=30,format=yuv420p[v];[2:a]aresample=48000,aformat=channel_layouts=stereo[a2];"
+         "[c][1:a][v][a2]concat=n=2:v=1:a=1[ov][oa]",
+         "-map", "[ov]", "-map", "[oa]", "-c:v", "libx264", "-crf", "20", "-c:a", "aac", "-b:a", "192k",
+         "-movflags", "+faststart", str(tmp)],
+        capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    if r.returncode != 0 or not tmp.exists() or tmp.stat().st_size < 100_000:
+        tmp.unlink(missing_ok=True)
+        return False
+    os.replace(tmp, final)
+    return True
+
+
+def _portadas(slug: str, final: Path) -> str:
+    """La portada (estilo de variante_portada) queda en el proyecto
+    (portada_<estilo>.jpg) y se pega como primer cuadro. Si algo falla, el
+    video sigue sin portada."""
+    proyecto = final.parent
+    hechas = []
+    try:
+        for v in (variante_portada(slug),):
+            r = subprocess.run([NARRATOR_PY, str(REMOTION_DIR / "scripts" / "portada.py"), slug, v],
+                               cwd=REMOTION_DIR, capture_output=True, text=True, encoding="utf-8",
+                               errors="replace", timeout=300,
+                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            hecha = REMOTION_DIR / "out" / f"{slug}_portada_{v}.jpg"
+            if r.returncode == 0 and hecha.exists():
+                shutil.move(str(hecha), str(proyecto / f"portada_{v}.jpg"))
+                hechas.append(v)
+    except subprocess.TimeoutExpired:
+        pass
+    finally:
+        shutil.rmtree(REMOTION_DIR / "public" / slug, ignore_errors=True)
+    if not hechas:
+        return "portada: no salió"
+    elegida = variante_portada(slug)
+    elegida = elegida if elegida in hechas else hechas[0]
+    pegada = _pegar_portada(final, proyecto / f"portada_{elegida}.jpg")
+    etiqueta = {"nota": "A (la nota)", "dato": "B (el dato)"}[elegida]
+    return f"portada {etiqueta}" + (" en el primer cuadro" if pegada else " (no se pudo pegar)")
 
 
 def velocidad_de_la_voz(slug: str, avatar: bool = False) -> float | None:
@@ -1094,6 +1189,11 @@ def _archivar_local(slug: str, final_mp4: Path, carpeta: Path) -> Path:
         destino = carpeta / f"{base}_{n}.mp4"
         n += 1
     shutil.copy2(final_mp4, destino)
+    # Las portadas viajan con el video (14/10/2026): <nombre>_portada_nota.jpg y _dato.jpg.
+    for v in ("nota", "dato"):
+        portada = final_mp4.parent / f"portada_{v}.jpg"
+        if portada.exists():
+            shutil.copy2(portada, destino.with_name(f"{destino.stem}_portada_{v}.jpg"))
     return destino
 
 
