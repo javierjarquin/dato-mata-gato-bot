@@ -578,6 +578,11 @@ HELP_TEXT = """Comandos disponibles — flujo típico: /nuevovideo → mandar gu
   Con tema (cancun, cdmx, terror, historia, marfil): escribe con la fórmula de
   la contradicción local (te afecta + ahorita + no cuadra + coraje), sin
   presentador. Ejemplo: /lotegrande 5 cancun
+  AUTOMÁTICO: con "dia" (todo el día) o un horario ("0-9" = Claude solo de 0 a
+  9 h), la fábrica escribe Y genera sola, 3 noticias (de no más de 2 días) por
+  cada 2 perennes, y sigue sola si se acaba la cuota. Los videos te llegan aquí
+  y se archivan sin publicar. Ejemplos: /lotegrande 20 dia
+  /lotegrande 15 0-9 cancun · Estado: /fabrica · Detener: /pararfabrica
   Sin tema: escribe un lote GRANDE y variado (default 30). A diferencia de /lote, reparte
   entre los seis formatos de crimen + trivia, para que el canal deje de abrir
   siempre igual: clásico, caso famoso con ángulo desconocido, caso abierto para
@@ -745,7 +750,9 @@ BOT_COMMANDS = [
     ("mitos", "Lote de mitos y leyendas [cantidad]"),
     ("completarlote", "Escribir lo que faltó del último lote (si se acabó la cuota)"),
     ("generarlote", "Generar los videos del último lote"),
-    ("lotegrande", "Lote grande [cantidad] [tema: cancun, cdmx...]"),
+    ("lotegrande", "Lote grande [cantidad] [dia | 0-9 = automático] [tema]"),
+    ("fabrica", "Cómo va la fábrica automática"),
+    ("pararfabrica", "Detener la fábrica automática"),
     ("generargrande", "Generar el lote grande y archivarlo sin publicar"),
     ("pausa", "Pausar el lote y liberar la GPU (/pausa ya = cortar el video actual)"),
     ("reanudar", "Seguir el lote donde quedó"),
@@ -1039,22 +1046,33 @@ async def cmd_lotegrande(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     from dato_mata_gato_bot import instruccion_cercania
 
     temas = {clave: nombre for clave, nombre, _ in instruccion_cercania.TEMAS}
-    n, tema = _LOTE_GRANDE_DEFAULT, None
+    n, tema, horario = _LOTE_GRANDE_DEFAULT, None, None
     for arg in context.args or []:
         if arg.isdigit():
             n = int(arg)
         elif arg.lower() in temas:
             tema = arg.lower()
+        elif arg.lower() == "dia":
+            horario = ""
+        elif re.fullmatch(r"\d{1,2}-\d{1,2}", arg) and all(0 <= int(x) <= 24 for x in arg.split("-")):
+            horario = arg
         else:
             await update.message.reply_text(
                 "Uso: /lotegrande [cantidad] [tema] (default 30, variado)\n"
+                "     /lotegrande 20 dia [tema]   → automático, todo el día\n"
+                "     /lotegrande 20 0-9 [tema]   → automático, Claude solo de 0 a 9 h\n"
                 f"Temas con la fórmula de cercanía: {', '.join(temas)}")
             return
+    if horario is not None:
+        await _lotegrande_automatico(update, n, horario, tema)
+        return
     if tema:
         # Con tema (13/10/2026): la fórmula de la contradicción local, la misma
         # de la fábrica, escrita en la sesión ligera. Sin presentador.
+        # 3 noticias : 2 perennes, igual que la fábrica (14/10/2026).
         await _pedir_lote(update, context,
-                          lambda k: [(f"{CERCANIA}{tema}", f"de {temas[tema]} (fórmula de cercanía)", k)],
+                          lambda k: [(f"{CERCANIA}{tema}:{v}", f"{v}s de {temas[tema]}", c)
+                                     for v, c in instruccion_cercania.repartir_vigencias(k)],
                           cantidad=n, sin_avatar=True)
         return
     await _pedir_lote(update, context, formatos.repartir, cantidad=n)
@@ -1062,6 +1080,116 @@ async def cmd_lotegrande(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 # Tramo "cercania:<tema>" de /lotegrande (fórmula de la contradicción local).
 CERCANIA = "cercania:"
+
+# Modo automático de /lotegrande (14/10/2026): la fábrica escribe y genera sola.
+# Por ventana de 5 h se escriben los que alcanzan a generarse (un video tarda
+# 40-45 min, casi todo la voz), así nunca se acumulan noticias que caducan.
+_VIDEOS_POR_VENTANA = int(os.getenv("FABRICA_VIDEOS_5H") or 6)
+_FABRICA_CLI = Path(__file__).resolve().parents[2] / "tools" / "fabrica.py"
+
+
+def _fabricas_activas() -> list[dict]:
+    from dato_mata_gato_bot import fabrica
+
+    if not fabrica.RAIZ.exists():
+        return []
+    activas = []
+    for d in sorted(fabrica.RAIZ.iterdir()):
+        try:
+            estado = fabrica.leer(d.name)
+        except (OSError, ValueError):
+            continue
+        if not estado.get("terminado"):
+            activas.append(estado)
+    return activas
+
+
+async def _lotegrande_automatico(update: Update, n: int, horario: str, tema: str | None) -> None:
+    """/lotegrande 20 dia [tema] o /lotegrande 20 0-9 [tema]: crea una fábrica
+    que escribe Y genera sola (3 noticias de no más de dos días : 2 perennes),
+    se reanuda tras el límite de Claude y archiva sin publicar."""
+    import subprocess
+    import sys
+
+    from dato_mata_gato_bot import fabrica, instruccion_cercania
+
+    if not _authorized(update.effective_chat.id):
+        await _reject_unauthorized(update)
+        return
+    activas = _fabricas_activas()
+    if activas:
+        await update.message.reply_text(
+            "Ya hay una fábrica trabajando (comparten la voz, va una a la vez):\n"
+            + "\n".join(fabrica.resumen(e) for e in activas)
+            + "\n\nEspera a que termine o detenla con /pararfabrica.")
+        return
+    lote = f"auto-{datetime.now():%Y%m%d-%H%M}"
+    estado = fabrica.crear(lote, n, "cercania", horas_claude=horario, tema=tema,
+                           por_tanda=_VIDEOS_POR_VENTANA, colchon=2, vigencias=True)
+    # La tarea de Windows la retoma cada 15 min; el primer ciclo arranca ya.
+    pyw = Path(sys.executable).with_name("pythonw.exe")
+    subprocess.Popen([str(pyw if pyw.exists() else sys.executable), str(_FABRICA_CLI), "ciclo", lote],
+                     cwd=str(_FABRICA_CLI.parents[1]),
+                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "DETACHED_PROCESS", 0))
+    temas = {c: nombre for c, nombre, _ in instruccion_cercania.TEMAS}
+    mezcla = instruccion_cercania.repartir_vigencias(n)
+    horas = n * 45 / 60
+    await update.message.reply_text(
+        f"🏭 Fábrica {lote} en marcha: {n} videos.\n"
+        f"• Tema: {temas[tema] if tema else 'repartido entre ' + ', '.join(temas)}\n"
+        "• Mezcla: " + " + ".join(f"{k} {v}s" for v, k in mezcla) + " (noticias de no más de 2 días y "
+        "de las que más movieron al público)\n"
+        f"• Claude escribe {'todo el día' if not horario else f'solo de {horario} h'}, hasta "
+        f"{_VIDEOS_POR_VENTANA} guiones por ventana de 5 h (lo que alcanza a generarse).\n"
+        f"• Si se acaba la cuota, sigue generando lo escrito y retoma sola.\n"
+        f"• Generar todo toma ~{horas:.0f} h. Cada video te llega aquí al terminar; se archiva en "
+        f"{estado['carpeta_videos']} sin publicar.\n"
+        "Estado: /fabrica · Detener: /pararfabrica")
+
+
+async def cmd_fabrica(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Cómo va la fábrica automática."""
+    from dato_mata_gato_bot import fabrica
+
+    if not _authorized(update.effective_chat.id):
+        await _reject_unauthorized(update)
+        return
+    activas = _fabricas_activas()
+    if not activas:
+        await update.message.reply_text("No hay ninguna fábrica trabajando. Arranca una con /lotegrande 20 dia")
+        return
+    lineas = []
+    for e in activas:
+        vig = {}
+        for v in e["videos"].values():
+            vig[v.get("vigencia") or "?"] = vig.get(v.get("vigencia") or "?", 0) + 1
+        linea = fabrica.resumen(e) + "\n  " + ", ".join(f"{k}: {v}" for k, v in vig.items() if k != "?")
+        if e.get("cuota_libre_desde"):
+            linea += f"\n  ⏸️ esperando la cuota de Claude hasta {e['cuota_libre_desde'].replace('T', ' ')}"
+        lineas.append(linea)
+    await update.message.reply_text("\n\n".join(lineas))
+
+
+async def cmd_pararfabrica(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Detiene la fábrica: no escribe ni empieza videos nuevos (el que se esté
+    generando termina). Lo ya hecho queda en su carpeta."""
+    from dato_mata_gato_bot import fabrica
+
+    if not _authorized(update.effective_chat.id):
+        await _reject_unauthorized(update)
+        return
+    activas = _fabricas_activas()
+    if not activas:
+        await update.message.reply_text("No hay ninguna fábrica trabajando.")
+        return
+    for e in activas:
+        estado = fabrica.leer(e["lote"])
+        estado["terminado"] = True
+        estado["detenida"] = datetime.now().isoformat(timespec="minutes")
+        fabrica.guardar(e["lote"], estado)
+    await update.message.reply_text(
+        "🛑 Detenida. El video que se esté generando termina y llega como siempre.\n"
+        + "\n".join(fabrica.resumen(fabrica.leer(e["lote"])) for e in activas))
 
 _LOTE_FISH3_DEFAULT = 10
 
@@ -1569,7 +1697,8 @@ async def _pedir_lote(
                 # `continue` y no `break`: los otros tramos no dependen de este.
                 if tipo.startswith(CERCANIA):
                     from dato_mata_gato_bot import fabrica
-                    guiones, _ = await fabrica._guiones_de_cercania(update, tipo[len(CERCANIA):], cant)
+                    clave, _, vig = tipo[len(CERCANIA):].partition(":")
+                    guiones, _ = await fabrica._guiones_de_cercania(update, clave, cant, vigencia=vig or None)
                 else:
                     guiones = await _guiones_de_crimen(update, session_id, is_new, cant,
                                                        desc, formato=tipo)
@@ -2416,6 +2545,8 @@ def main() -> None:
     app.add_handler(CommandHandler("nuevolote", cmd_crimen))
     app.add_handler(CommandHandler("generarlote", cmd_generarlote))
     app.add_handler(CommandHandler("lotegrande", cmd_lotegrande))
+    app.add_handler(CommandHandler("fabrica", cmd_fabrica))
+    app.add_handler(CommandHandler("pararfabrica", cmd_pararfabrica))
     app.add_handler(CommandHandler("generargrande", cmd_generargrande))
     app.add_handler(CommandHandler("pausa", cmd_pausa))
     app.add_handler(CommandHandler("reanudar", cmd_reanudar))

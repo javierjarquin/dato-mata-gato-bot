@@ -107,7 +107,8 @@ def _lotegrande(monkeypatch, args):
 def test_lotegrande_con_tema_usa_la_formula_de_cercania(monkeypatch):
     for args in (["5", "cancun"], ["cancun", "5"], ["5", "Cancun"]):
         pedido, _ = _lotegrande(monkeypatch, args)
-        assert pedido["tramos"] == [("cercania:cancun", "de Cancún y Quintana Roo (fórmula de cercanía)", 5)]
+        assert pedido["tramos"] == [("cercania:cancun:noticia", "noticias de Cancún y Quintana Roo", 3),
+                                    ("cercania:cancun:perenne", "perennes de Cancún y Quintana Roo", 2)]
         assert pedido["kw"]["sin_avatar"] is True
 
 

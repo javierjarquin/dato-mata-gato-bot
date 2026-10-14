@@ -54,10 +54,7 @@ guion tiene que tener LOS CUATRO; si le falta uno, busca otro tema:
   1. TE AFECTA (efecto de autorreferencia: el cerebro atiende y recuerda lo que tiene que ver
      con uno mismo). Le pasa a casi cualquiera que vive ahí, sin importar de dónde vino: su
      recibo, su colonia, su camión, su playa. No solo a un gremio o a los turistas.
-  2. ESTÁ PASANDO AHORITA (saliencia o actualidad: lo de ahorita pesa más que lo que pasará o
-     ya pasó). Noticia de esta semana o de este mes, con fecha en la nota. Por eso Aguakan pegó
-     y el subsidio de la luz no.
-  3. ALGO NO CUADRA (brecha de curiosidad, Loewenstein 1994: cuando algo no cuadra, el cerebro
+<<AHORITA>>  3. ALGO NO CUADRA (brecha de curiosidad, Loewenstein 1994: cuando algo no cuadra, el cerebro
      necesita cerrar el hueco). Una contradicción concreta: "votamos que se fuera y sigue aquí",
      "hay un acuerdo de 24 pesos y aquí pagas 25", "dicen que es vandalismo y la presidenta dice
      que fue una torre".
@@ -75,6 +72,28 @@ En "_schema.condiciones" escribe, una por una, cómo cumple el guion cada pieza 
 de la noticia en la 2). Un guion al que le falte una se descarta en la revisión.
 En los temas que no son locales (terror, "la historia de", tipo Marfil), la 1 es que le toque a
 quien vive en México hoy, y la 5 que haya un lugar, un objeto o un documento real que mostrar.
+
+LO QUE SUMA (no es obligatorio, pero un guion que lo tiene vale más)
+  6. VALOR PRÁCTICO (Berger, "Contagious": lo útil se comparte para ayudar a otros): algo que la
+     persona puede hacer o revisar: "revisa esto en tu recibo", "aquí se reporta", "pregunta
+     esto antes de comprar". Escríbelo en "_schema.condiciones.6_valor_practico".
+  - "Lo que casi nadie sabe" (moneda social: se comparte lo que hace ver enterado al que lo
+    comparte), dicho con hechos, no como promesa vacía.
+  - El final pesa más que el resto (regla pico-final): p07 cierra con la frase más fuerte del
+    video, nunca con una moraleja.
+
+QUE ENVEJEZCA BIEN (el video se va a ver semanas o meses después, sobre todo por búsquedas)
+  - En la NARRACIÓN no van palabras de tiempo relativo: hoy, ayer, mañana, anoche, esta semana,
+    este mes, este año, la semana pasada, el pasado lunes, hace tres días. Se dice la fecha o el
+    año ("en octubre de dos mil veintiséis", "desde dos mil diecisiete"), o "sigue" ("sigue sin
+    abrir"). La fecha exacta de la nota va en texto_en_pantalla o en una ficha.
+  - Una cifra que cambia (un precio, un conteo) va con su fecha: "en octubre llegó a…".
+  - Amárralo a algo que regresa en la vida de quien lo ve (Berger: los disparadores mantienen
+    vivo un tema): el recibo bimestral, la quincena, la temporada de huracanes o de sargazo, el
+    regreso a clases, la temporada alta. Cada vez que regresa, el video vuelve a servir.
+  - "titulo", texto_en_pantalla y hashtags llevan lo que la gente BUSCARÍA ("agua en Cancún",
+    "Aguakan", "sargazo"), sin fechas.
+  - En "_schema.vigencia" escribe "<<VIGENCIA>>".
 
 VERIFICACIÓN (lo más importante: si un dato no se puede verificar, NO va)
 1. Busca la noticia reciente y ÁBRELA (WebFetch). No te quedes con el resumen del buscador:
@@ -98,7 +117,7 @@ ESTRUCTURA (9 planos, ids p00 a p08)
 - p02 "contexto", p03 "el_hecho", p04 "bucle_abierto", p05 "el_desenlace": la noticia con sus
   cifras y nombres, atribuidos.
 - p06 "contexto": el TRASFONDO histórico (cuándo empezó, qué pasó antes).
-- p07 "cierre_bucle": vuelve a la pregunta abierta, sin moraleja.
+- p07 "cierre_bucle": vuelve a la pregunta abierta y cierra con la frase más fuerte, sin moraleja.
 - p08 "identidad_cierre": "Aquí el dato mata al gato. ¿[pregunta al espectador sobre SU vida]?
   Cuéntamelo en los comentarios." Su visual: {"tipo": "grafico_movimiento", "descripcion":
   "Cartel de cierre del canal.", "prompt_ia": "", "busqueda_medios": ""}.
@@ -210,9 +229,56 @@ CÓMO TRABAJAR (cada respuesta tuya relee todo lo anterior: menos respuestas = m
 """.replace("<<H>>", HERRAMIENTAS)
 
 
-def instruccion(clave: str, n: int, ya_hechos: str, ligera: bool = False) -> str:
+# La pieza 2 cambia según el tipo de video (Javier, 14/10/2026): 3 de cada 5 son
+# noticias de no más de dos días y de las que más movieron al público; 2 son
+# perennes, que siguen siendo verdad en meses. Los dos con la misma fórmula.
+VIGENCIAS = ("noticia", "perenne")
+MEZCLA = {"noticia": 3, "perenne": 2}
+DIAS_NOTICIA = 2
+
+_AHORITA = {
+    None: """  2. ESTÁ PASANDO AHORITA (saliencia o actualidad: lo de ahorita pesa más que lo que pasará o
+     ya pasó). Noticia de esta semana o de este mes, con fecha en la nota. Por eso Aguakan pegó
+     y el subsidio de la luz no.
+""",
+    "noticia": """  2. ESTÁ PASANDO AHORITA (saliencia o actualidad: lo de ahorita pesa más que lo que pasará o
+     ya pasó). Una NOTICIA de los últimos DOS días: con fecha en la nota del <<DESDE>> o después,
+     nunca más vieja. Y de las que MÁS movieron al público: busca primero en "lo más leído" o
+     "lo más visto" de los medios locales, las que tienen más comentarios o las que publicaron
+     varios medios. En "_schema.impacto" anota de dónde sale que movió a la gente ("en lo más
+     leído de PorEsto", "la publicaron Noticaribe, PorEsto y Novedades"). Por eso Aguakan pegó
+     y el subsidio de la luz no.
+""",
+    "perenne": """  2. SIGUE PASANDO (saliencia sin caducidad): un problema que lleva tiempo y que en seis meses
+     seguirá siendo verdad, con su historia y sus fechas ("la concesión vence en dos mil
+     cincuenta y tres", "lleva nueve años cerrado"). Si hay una noticia reciente, sirve de
+     excusa, pero el video no depende de ella. En la 2 de "_schema.condiciones" escribe por
+     qué seguirá vigente y la fecha del dato más reciente.
+""",
+}
+
+
+def repartir_vigencias(n: int, conteo: dict[str, int] | None = None) -> list[tuple[str, int]]:
+    """n guiones repartidos 3 noticias : 2 perennes, compensando lo que ya hay
+    (como `repartir` con los temas). 5 -> 3 + 2; 1 -> el que vaya atrás."""
+    cuenta = {v: (conteo or {}).get(v, 0) for v in VIGENCIAS}
+    pedidos = {v: 0 for v in VIGENCIAS}
+    for _ in range(n):
+        total = sum(cuenta.values()) + sum(pedidos.values()) + 1
+        v = max(VIGENCIAS, key=lambda x: MEZCLA[x] * total / sum(MEZCLA.values()) - cuenta[x] - pedidos[x])
+        pedidos[v] += 1
+    return [(v, k) for v, k in pedidos.items() if k]
+
+
+def instruccion(clave: str, n: int, ya_hechos: str, ligera: bool = False,
+                vigencia: str | None = None, hoy=None) -> str:
+    from datetime import date, timedelta
+
     tema = next(t for t in TEMAS if t[0] == clave)
-    texto = (INSTRUCCION.replace("<<N>>", str(n)).replace("<<TEMA>>", tema[1])
+    desde = (hoy or date.today()) - timedelta(days=DIAS_NOTICIA)
+    texto = (INSTRUCCION.replace("<<AHORITA>>", _AHORITA[vigencia]).replace("<<DESDE>>", f"{desde:%d/%m/%Y}")
+             .replace("<<VIGENCIA>>", vigencia or "noticia o perenne")
+             .replace("<<N>>", str(n)).replace("<<TEMA>>", tema[1])
              .replace("<<DESCRIPCION>>", tema[2]).replace("<<CLAVE>>", tema[0]))
     if ligera:
         texto = texto.replace(

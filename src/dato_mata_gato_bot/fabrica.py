@@ -75,7 +75,10 @@ def guardar(lote: str, estado: dict) -> None:
     os.replace(tmp, ruta)
 
 
-def crear(lote: str, objetivo: int, formato: str = "cercania") -> dict:
+def crear(lote: str, objetivo: int, formato: str = "cercania", **opciones) -> dict:
+    """`opciones` (modo automático de /lotegrande, 14/10/2026): horas_claude
+    ("" = todo el día, "0-9"), tema (una clave de instruccion_cercania o None =
+    repartido), por_tanda, colchon y vigencias (mezcla noticia/perenne)."""
     ruta = ruta_estado(lote)
     if ruta.exists():
         raise FileExistsError(f"Ya existe la fábrica '{lote}': {ruta}")
@@ -86,6 +89,7 @@ def crear(lote: str, objetivo: int, formato: str = "cercania") -> dict:
         "carpeta_videos": str(pipeline.ANDROID_IN / "lotes" / lote),
         "guiones_pedidos": 0, "videos": {}, "cuota_libre_desde": None,
         "ultimo_aviso_infra": 0, "terminado": False,
+        **opciones,
     }
     guardar(lote, estado)
     return estado
@@ -95,6 +99,8 @@ def pendientes(estado: dict) -> list[str]:
     """Los que faltan, en el orden en que se escribieron. Un fallido con
     intentos de sobra vuelve a la fila, pero DETRÁS de los nuevos."""
     nuevos = [s for s, v in estado["videos"].items() if v["estado"] == "pendiente"]
+    # Las noticias caducan (no más de dos días): van antes que las perennes.
+    nuevos.sort(key=lambda s: estado["videos"][s].get("vigencia") != "noticia")
     reintentos = [s for s, v in estado["videos"].items()
                   if v["estado"] == "fallido" and v["intentos"] < MAX_INTENTOS]
     return nuevos + reintentos
@@ -110,16 +116,33 @@ def resumen(estado: dict) -> str:
 def hora_de_reset(texto: str, ahora: datetime) -> datetime:
     """'You've hit your session limit · resets 3:40pm' -> la próxima 3:40 pm.
     Sin hora legible, se reintenta en ESPERA_CUOTA."""
-    m = re.search(r"resets\s+(\d{1,2})(?::(\d{2}))?\s*([ap]m)?", texto or "", re.IGNORECASE)
+    # El límite SEMANAL trae fecha o día (14/10/2026): "resets Oct 20, 3pm",
+    # "resets Mon 9am". Sin fecha es el de la sesión de 5 h: la próxima vez que
+    # llegue esa hora.
+    m = re.search(r"resets\s+(?:(?:on\s+)?(?P<fecha>[a-z]{3,9})\.?\s*(?P<dia>\d{1,2})?(?:st|nd|rd|th)?,?\s+"
+                  r"(?:at\s+)?)?(?:at\s+)?(?P<h>\d{1,2})(?::(?P<mi>\d{2}))?\s*(?P<ampm>[ap]\.?m\.?)?",
+                  texto or "", re.IGNORECASE)
     if not m:
         return ahora + timedelta(seconds=ESPERA_CUOTA)
-    h, mi, ampm = int(m.group(1)), int(m.group(2) or 0), (m.group(3) or "").lower()
+    h, mi = int(m.group("h")), int(m.group("mi") or 0)
+    ampm = (m.group("ampm") or "").lower().replace(".", "")
     if ampm == "pm" and h != 12:
         h += 12
     if ampm == "am" and h == 12:
         h = 0
     cuando = ahora.replace(hour=h % 24, minute=mi, second=0, microsecond=0)
-    if cuando <= ahora:
+    palabra = (m.group("fecha") or "").lower()[:3]
+    meses = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
+    dias = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+    if palabra in meses and m.group("dia"):
+        cuando = cuando.replace(month=meses.index(palabra) + 1, day=int(m.group("dia")))
+        if cuando <= ahora:
+            cuando = cuando.replace(year=cuando.year + 1)
+    elif palabra in dias:
+        cuando += timedelta(days=(dias.index(palabra) - ahora.weekday()) % 7)
+        if cuando <= ahora:
+            cuando += timedelta(days=7)
+    elif cuando <= ahora:
         cuando += timedelta(days=1)
     return cuando + timedelta(minutes=2)
 
@@ -251,10 +274,56 @@ CONDICIONES = ("1_te_afecta", "2_esta_pasando_ahorita", "3_algo_no_cuadra", "4_c
                "5_se_puede_grabar")
 
 
-def problemas_cercania(slug: str) -> list[str]:
+# Que el video envejezca bien (14/10/2026): en la voz no va tiempo relativo,
+# porque el video se ve semanas después ("ayer" deja de ser verdad). "Mañana"
+# no entra: casi siempre es "esa mañana".
+_TIEMPO_RELATIVO = re.compile(
+    r"\b(hoy|ayer|anoche|anteayer|esta semana|este mes|este año|la semana pasada|el mes pasado|"
+    r"el año pasado|el pasado (?:lunes|martes|miércoles|jueves|viernes|sábado|domingo)|"
+    r"hace (?:un|una|dos|tres|cuatro|cinco|unos|unas|pocos|pocas) (?:días|día|semanas|semana|meses|mes))\b",
+    re.IGNORECASE)
+
+
+def problemas_de_vigencia(guion: dict, vigencia: str | None = None, hoy: datetime | None = None) -> list[str]:
+    """Las reglas de noticia/perenne y de "que envejezca bien"."""
+    from dato_mata_gato_bot import instruccion_cercania
+
+    out = []
+    for p in guion.get("planos", []):
+        dichas = sorted({m.group(0).lower() for m in _TIEMPO_RELATIVO.finditer(p.get("narracion", ""))})
+        if dichas:
+            out.append(f"{p.get('id')}: la voz dice {', '.join(repr(d) for d in dichas)}; el video se ve "
+                       "semanas después: di la fecha o el año, o \"sigue\"")
+    schema = guion.get("_schema") or {}
+    escrita = str(schema.get("vigencia", "")).strip().lower()
+    if vigencia and escrita != vigencia:
+        out.append(f'_schema.vigencia tiene que ser "{vigencia}" (dice "{escrita or "nada"}")')
+    if (vigencia or escrita) == "noticia":
+        if not str(schema.get("impacto", "")).strip():
+            out.append('falta "_schema.impacto": de dónde sale que la noticia movió al público '
+                       "(lo más leído, comentarios, varios medios)")
+        texto = str((schema.get("condiciones") or {}).get("2_esta_pasando_ahorita", ""))
+        fechas = []
+        for d, m, a in re.findall(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b", texto):
+            try:
+                fechas.append(datetime(int(a), int(m), int(d)))
+            except ValueError:
+                pass
+        limite = (hoy or datetime.now()).replace(hour=0, minute=0, second=0, microsecond=0) \
+            - timedelta(days=instruccion_cercania.DIAS_NOTICIA)
+        if not fechas:
+            out.append("en _schema.condiciones.2_esta_pasando_ahorita falta la fecha de la nota (DD/MM/AAAA)")
+        elif max(fechas) < limite:
+            out.append(f"la noticia es del {max(fechas):%d/%m/%Y}: tiene que ser del {limite:%d/%m/%Y} o "
+                       "más nueva. Busca otra de los últimos dos días")
+    return out
+
+
+def problemas_cercania(slug: str, vigencia: str | None = None) -> list[str]:
     """Revisión sin Claude de un guion de cercanía: lugar exacto y evidencia
     real (las reglas de revision_guion, sin el mínimo de 3 nombres del true
-    crime) y las CUATRO condiciones de la fórmula, escritas en el guion."""
+    crime), las CUATRO condiciones de la fórmula escritas en el guion y, desde
+    el 14/10/2026, las reglas de noticia/perenne y de que envejezca bien."""
     from dato_mata_gato_bot import revision_guion
 
     try:
@@ -267,7 +336,7 @@ def problemas_cercania(slug: str) -> list[str]:
     if faltan:
         out.append("no explica cómo cumple estas piezas de la fórmula en _schema.condiciones: "
                    + ", ".join(faltan) + ". Si le falta una, cambia el tema por otro que las tenga todas")
-    return out
+    return out + problemas_de_vigencia(guion, vigencia)
 
 
 def sesion_ligera() -> bool:
@@ -276,8 +345,8 @@ def sesion_ligera() -> bool:
     return (os.getenv("FABRICA_SESION_LIGERA") or "1").strip() != "0"
 
 
-async def _guiones_de_cercania(avisador, clave: str, cantidad: int,
-                               ligera: bool | None = None) -> tuple[list[dict], list[str]]:
+async def _guiones_de_cercania(avisador, clave: str, cantidad: int, ligera: bool | None = None,
+                               vigencia: str | None = None) -> tuple[list[dict], list[str]]:
     """Un tema de la fórmula de cercanía: escribe, revisa, una ronda de
     corrección (en la misma conversación: ya tiene el tema investigado) y deja
     fuera lo que siga fallando. Devuelve (guiones buenos, sesiones usadas)."""
@@ -286,7 +355,8 @@ async def _guiones_de_cercania(avisador, clave: str, cantidad: int,
 
     ligera = sesion_ligera() if ligera is None else ligera
     session_id, _ = bot._sesion_nueva()
-    texto = instruccion_cercania.instruccion(clave, cantidad, bot._ya_cubiertos("guion"), ligera=ligera)
+    texto = instruccion_cercania.instruccion(clave, cantidad, bot._ya_cubiertos("guion"), ligera=ligera,
+                                             vigencia=vigencia)
     r = await asyncio.to_thread(run_turn, session_id, texto, True, ligera)
     if not r.ok:
         if es_limite_de_uso(r.text):
@@ -294,7 +364,7 @@ async def _guiones_de_cercania(avisador, clave: str, cantidad: int,
         await avisador.message.reply_text(f"Falló el tema {clave}: {r.text[:800]}")
         return [], [session_id]
     guiones = bot._parse_lote_response(r.text) or []
-    fallas = {g["slug"]: p for g in guiones if g.get("slug") if (p := problemas_cercania(g["slug"]))}
+    fallas = {g["slug"]: p for g in guiones if g.get("slug") if (p := problemas_cercania(g["slug"], vigencia))}
     if fallas:
         pedido = ("Revisé los guiones y estos no cumplen la fórmula. Corrígelos en su guion.json "
                   "(mismo slug); si un tema no cumple las cuatro condiciones o no tiene evidencia, "
@@ -307,8 +377,12 @@ async def _guiones_de_cercania(avisador, clave: str, cantidad: int,
             raise bot.LimiteDeClaude(r2.text)
     buenos, fuera = [], {}
     for g in guiones:
-        p = problemas_cercania(g.get("slug", ""))
-        (fuera.__setitem__(g.get("slug", "?"), p) if p else buenos.append(g))
+        p = problemas_cercania(g.get("slug", ""), vigencia)
+        if p:
+            fuera[g.get("slug", "?")] = p
+        else:
+            g["vigencia"] = vigencia or ""
+            buenos.append(g)
     if fuera:
         await avisador.message.reply_text(
             f"⚠️ Tema {clave}: {len(fuera)} guion(es) quedan fuera porque no cumplen la fórmula:\n"
@@ -330,22 +404,40 @@ def escribir_tanda(estado: dict) -> tuple[list[str], str | None]:
     from dato_mata_gato_bot import bot, instruccion_cercania  # import tardío: trae Telegram y Claude
 
     faltan = estado["objetivo"] - len(estado["videos"])
-    cuantos = min(POR_TANDA, faltan)
+    cuantos = min(int(estado.get("por_tanda", POR_TANDA)), faltan)
     nuevos: list[str] = []
     sesiones = estado.setdefault("_sesiones_tanda", [])
     sesiones.clear()
+    vigencias = estado.setdefault("_vigencias", {})
     if estado.get("formato", "cercania") == "cercania":
         conteo: dict[str, int] = {}
         for slug in estado["videos"]:
             if (t := instruccion_cercania.tema_de(slug)):
                 conteo[t] = conteo.get(t, 0) + 1
-        for clave, cant in instruccion_cercania.repartir(cuantos, conteo):
+        temas = ([(estado["tema"], cuantos)] if estado.get("tema")
+                 else instruccion_cercania.repartir(cuantos, conteo))
+        if estado.get("vigencias"):
+            # Mezcla noticia/perenne (3:2) sobre lo que ya lleva el lote.
+            ya: dict = {}
+            for v in estado["videos"].values():
+                ya[v.get("vigencia")] = ya.get(v.get("vigencia"), 0) + 1
+            lista_v = [v for v, k in instruccion_cercania.repartir_vigencias(cuantos, ya) for _ in range(k)]
+        else:
+            lista_v = [None] * cuantos
+        lista_t = [c for c, k in temas for _ in range(k)]
+        grupos: dict[tuple, int] = {}
+        for par in zip(lista_t, lista_v):
+            grupos[par] = grupos.get(par, 0) + 1
+        for (clave, vig), cant in grupos.items():
             try:
-                guiones, usadas = asyncio.run(_guiones_de_cercania(_Avisador(), clave, cant))
+                guiones, usadas = asyncio.run(_guiones_de_cercania(_Avisador(), clave, cant, vigencia=vig))
             except bot.LimiteDeClaude as exc:
                 return nuevos, str(exc)
             sesiones += usadas
-            nuevos += [g["slug"] for g in guiones if g.get("slug")]
+            for g in guiones:
+                if g.get("slug"):
+                    nuevos.append(g["slug"])
+                    vigencias[g["slug"]] = vig or ""
         estado["guiones_pedidos"] += cuantos
         return nuevos, None
     for tipo, desc, cant in formatos.repartir_fish3(cuantos):
@@ -476,8 +568,10 @@ def video(lote: str, slug: str) -> None:
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(final), "-vf", "scale=-2:1280",
                         "-c:v", "libx264", "-crf", "28", "-c:a", "aac", "-b:a", "128k",
                         "-movflags", "+faststart", str(liviano)], check=False, creationflags=_SIN_VENTANA)
-        telegram(f"🎬 {slug} ({(time.time() - inicio) / 60:.0f} min)\n{r.mensaje[-700:]}",
-                 liviano if liviano.exists() else None)
+        vig = estado["videos"].get(slug, {}).get("vigencia", "")
+        etiqueta = {"noticia": "📰 NOTICIA: publícala pronto, caduca", "perenne": "🌲 PERENNE"}.get(vig, "")
+        telegram(f"🎬 {slug} ({(time.time() - inicio) / 60:.0f} min)" + (f"\n{etiqueta}" if etiqueta else "")
+                 + f"\n{r.mensaje[-700:]}", liviano if liviano.exists() else None)
         limpiar(slug, liviano)
     print("RESULTADO " + json.dumps({"ok": r.ok, "mensaje": r.mensaje[-1500:]}, ensure_ascii=False),
           flush=True)
@@ -517,7 +611,7 @@ def _ciclo(lote: str) -> str:
         cuota_libre = (estado["cuota_libre_desde"] is None
                        or datetime.now() >= datetime.fromisoformat(estado["cuota_libre_desde"]))
         freno = puede_usar_claude(estado, datetime.now())
-        if (len(fila) < COLCHON and len(estado["videos"]) < estado["objetivo"]
+        if (len(fila) < int(estado.get("colchon", COLCHON)) and len(estado["videos"]) < estado["objetivo"]
                 and cuota_libre and not freno):
             inicio_tanda = datetime.now()
             nuevos, limite = escribir_tanda(estado)
@@ -530,8 +624,10 @@ def _ciclo(lote: str) -> str:
                 estado["cuota_libre_desde"] = libre.isoformat(timespec="minutes")
                 telegram(f"⏸️ Fábrica {lote}: se acabó la cuota de Claude. Sigo renderizando "
                          f"lo que hay y retomo los guiones a las {libre:%H:%M}.")
+            vigencias = estado.pop("_vigencias", {})
             for s in nuevos:
-                estado["videos"].setdefault(s, {"estado": "pendiente", "intentos": 0, "error": ""})
+                estado["videos"].setdefault(s, {"estado": "pendiente", "intentos": 0, "error": "",
+                                                "vigencia": vigencias.get(s, "")})
             if nuevos:
                 plan = lote_grande.Plan(carpeta=Path(estado["carpeta_videos"]),
                                         tareas=[(s, None) for s in nuevos])
