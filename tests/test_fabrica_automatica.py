@@ -105,3 +105,12 @@ def test_lotegrande_automatico_crea_la_fabrica(tmp_path, monkeypatch):
 
     asyncio.run(bot.cmd_pararfabrica(update, SimpleNamespace(args=[])))
     assert json.loads(estados[0].read_text(encoding="utf-8"))["terminado"] is True
+
+
+def test_tanda_cortada_no_cuenta_para_la_ventana(monkeypatch):
+    monkeypatch.setenv("FABRICA_TANDAS_5H", "1")
+    ahora = datetime(2026, 10, 14, 11, 0)
+    cortada = {"horas_claude": "", "consumo": [{"t": "2026-10-14T09:13", "guiones": 4, "cortada": True}]}
+    assert fabrica.puede_usar_claude(cortada, ahora) is None
+    entera = {"horas_claude": "", "consumo": [{"t": "2026-10-14T09:13", "guiones": 6}]}
+    assert "ya se pidieron" in fabrica.puede_usar_claude(entera, ahora)

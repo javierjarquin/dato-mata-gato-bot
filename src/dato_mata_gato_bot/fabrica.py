@@ -539,8 +539,12 @@ def puede_usar_claude(estado: dict, ahora: datetime) -> str | None:
         if not dentro:
             return f"fuera del horario de Claude ({horas} h)"
     maximo = int(os.getenv("FABRICA_TANDAS_5H") or 1)
+    # Una tanda que cortó el límite de Claude no cuenta como la de su ventana
+    # (14/10/2026): el 14/10 la de las 09:13 se cortó a las 09:42 con 4 de 6
+    # guiones, la cuota volvió a las 10:30 y la fábrica igual esperó a las 14:13
+    # con ~1.5 h parada sin nada que generar.
     recientes = [c for c in estado.get("consumo", [])
-                 if ahora - datetime.fromisoformat(c["t"]) < timedelta(hours=5)]
+                 if ahora - datetime.fromisoformat(c["t"]) < timedelta(hours=5) and not c.get("cortada")]
     if len(recientes) >= maximo:
         return f"ya se pidieron {len(recientes)} tanda(s) en las últimas 5 h (máximo {maximo})"
     return None
@@ -650,7 +654,8 @@ def _ciclo(lote: str) -> str:
             nuevos, limite = escribir_tanda(estado)
             gasto = tokens_de_sesiones(estado.pop("_sesiones_tanda", []))
             estado.setdefault("consumo", []).append(
-                {"t": inicio_tanda.isoformat(timespec="minutes"), "guiones": len(nuevos), **gasto})
+                {"t": inicio_tanda.isoformat(timespec="minutes"), "guiones": len(nuevos), **gasto,
+                 **({"cortada": True} if limite else {})})
             estado["cuota_libre_desde"] = None
             if limite:
                 libre = hora_de_reset(limite, datetime.now())
