@@ -27,6 +27,12 @@ _BLOCKLIST_WORDS = [
     "gloucester", "england", "united kingdom", "wroclaw", "wrocław",
     "bursa", "buenos aires", "manila", "philippines", "filipinas",
     "ludhiana", "venezuela", "hawaii", "haway",
+    # Vistos en videos reales el 18-20/09/2026, antes de invertir el orden de
+    # búsqueda: una comisaría de Taichung para un caso de Nuevo Laredo, el
+    # aeropuerto de Moradabad para uno de Pemex, y la Torre Eiffel sobre el
+    # subtítulo "Eres reportero en Culiacán".
+    "taiwan", "taiwán", "taichung", "moradabad", "india", "paris", "parís",
+    "eiffel", "tokyo", "tokio", "seoul", "seúl", "bangkok", "vietnam",
 ]
 
 _PATTERN = re.compile(
@@ -56,6 +62,23 @@ def _manifest_path(illustrated_narrator_projects: Path, slug: str) -> Path:
     return illustrated_narrator_projects / slug / "media" / "manifest.json"
 
 
+_EXTENSIONES = (".png", ".jpg", ".jpeg", ".webp", ".mp4", ".webm", ".mov")
+
+
+def _tiene_archivo(proyecto: Path, shot_id: str) -> bool:
+    """¿Esta toma tiene una imagen o un video en disco, venga de donde venga?
+
+    Cubre las dos rutas del narrador: `images/<toma>.<ext>` para imágenes
+    (reales o generadas con IA) y `media/<plano>/<toma>.<ext>` para video.
+    """
+    plano = _plano_id(shot_id)
+    for base in (proyecto / "images", proyecto / "media" / plano):
+        for ext in _EXTENSIONES:
+            if (base / f"{shot_id}{ext}").exists():
+                return True
+    return False
+
+
 def check_manifest(illustrated_narrator_projects: Path, slug: str) -> list[FlaggedShot]:
     """Escanea manifest.json y devuelve las tomas con país incoherente o
     sin ningún medio resuelto. No hace red ni llama a Claude."""
@@ -70,10 +93,23 @@ def check_manifest(illustrated_narrator_projects: Path, slug: str) -> list[Flagg
         pid = _plano_id(shot_id)
         resolved_by_plano[pid] = resolved_by_plano.get(pid, False) or entry.get("chosen") is not None
 
+    proyecto = illustrated_narrator_projects / slug
     flagged: list[FlaggedShot] = []
     for shot_id, entry in manifest.items():
         chosen = entry.get("chosen")
         if chosen is None:
+            # "Sin match de archivo" NO es lo mismo que "sin medio": desde el
+            # 20/09/2026 la toma que no encuentra evidencia se GENERA con IA, y
+            # eso es un medio perfectamente válido -- de hecho es el modo
+            # normal para los casos sin archivo público.
+            #
+            # Sin este chequeo, un video hecho todo con IA sale con TODAS sus
+            # tomas marcadas: el pipeline entra en sus 10 reintentos de ~17
+            # minutos cada uno, y ninguno arregla nada porque no hay nada roto.
+            # Confirmado en una corrida real (guion-rios-galeana): 22 tomas
+            # marcadas, dos reintentos completos perdidos antes de notarlo.
+            if _tiene_archivo(proyecto, shot_id):
+                continue
             if not resolved_by_plano[_plano_id(shot_id)]:
                 flagged.append(FlaggedShot(shot_id, "sin_medio", ""))
             continue
