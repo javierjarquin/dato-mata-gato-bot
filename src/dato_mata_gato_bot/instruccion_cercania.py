@@ -65,7 +65,7 @@ guion tiene que tener LOS CUATRO; si le falta uno, busca otro tema:
      presenta como acusado.
   Y además: 5. SE PUEDE GRABAR O MOSTRAR: la colonia, el recibo, la calle, la gasolinera, la playa,
      el documento; algo real que cualquiera puede ir a ver.
-  6. HACE HABLAR (obligatoria desde el 15/10/2026): un tema del que quien lo ve TIENE SU PROPIA
+  6. HACE HABLAR (obligatoria desde el 14/10/2026): un tema del que quien lo ve TIENE SU PROPIA
      EXPERIENCIA u opinión que contar: su trabajo, su sueldo, lo que le cobraron, su renta, su
      servicio. Es lo que más funcionó en el canal: "2000 despedidos" (la gente contó dónde la
      recortaron), la Terminal 2 que cobra de más, lo que cuesta abrir un negocio. Una noticia que
@@ -246,12 +246,12 @@ CÓMO TRABAJAR (cada respuesta tuya relee todo lo anterior: menos respuestas = m
 
 
 # La pieza 2 cambia según el tipo de video (Javier, 14/10/2026): 3 de cada 5 son
-# "noticia" y 2 perennes, que siguen siendo verdad en meses. Desde el 15/10 la
+# "noticia" y 2 perennes, que siguen siendo verdad en meses. Desde el 14/10 la
 # "noticia" es un tema que está pasando y hace hablar, con dato de este mes (ya
 # no lo más nuevo de dos días): "2000 despedidos" fue lo que más conversación dio.
 VIGENCIAS = ("noticia", "perenne")
 MEZCLA = {"noticia": 3, "perenne": 2}
-DIAS_NOTICIA = 30  # "dato de este mes"; antes 2 días (14/10), Javier lo relajó el 15/10
+DIAS_NOTICIA = 30  # "dato de este mes"; antes 2 días (14/10), Javier lo relajó ese mismo día
 
 _AHORITA = {
     None: """  2. ESTÁ PASANDO AHORITA (saliencia o actualidad: lo de ahorita pesa más que lo que pasará o
@@ -261,7 +261,7 @@ _AHORITA = {
     "noticia": """  2. ESTÁ PASANDO AHORITA (saliencia o actualidad: lo de ahorita pesa más que lo que pasará o
      ya pasó). Un tema que ESTÁ PASANDO y del que la gente ESTÁ HABLANDO, con un dato de este
      mes: fecha en la nota del <<DESDE>> o después. No tiene que ser la nota más nueva (Javier,
-     15/10/2026: "ya no tanto por noticia"): vale más uno que hace hablar (pieza 6) que uno de
+     14/10/2026: "ya no tanto por noticia"): vale más uno que hace hablar (pieza 6) que uno de
      ayer. Para saber de qué se habla: lo más comentado o compartido, lo que publicaron varios
      medios, lo que la gente reclama. En "_schema.impacto" anota de dónde sale que la gente
      está hablando de esto ("la publicaron Noticaribe, PorEsto y Novedades", "lo más comentado

@@ -302,7 +302,7 @@ CONDICIONES = ("1_te_afecta", "2_esta_pasando_ahorita", "3_algo_no_cuadra", "4_c
 
 
 def problemas_de_preguntas(guion: dict) -> list[str]:
-    """Dos preguntas directas a quien ve (15/10/2026, idea de Javier): una antes
+    """Dos preguntas directas a quien ve (14/10/2026, idea de Javier): una antes
     del segundo diez (p01 o p02) y otra a la mitad (p03 a p05). Enganchan con
     su propio caso y dejan la respuesta lista para los comentarios."""
     narr = {p.get("id"): p.get("narracion", "") for p in guion.get("planos", [])}

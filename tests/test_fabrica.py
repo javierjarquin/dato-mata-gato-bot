@@ -152,7 +152,7 @@ def _guion_cercania(tmp_path, slug, condiciones):
         "evidencia": [{"id": "e1", "tipo": "prensa"}, {"id": "e2", "tipo": "lugar"},
                       {"id": "e3", "tipo": "documento"}],
         "planos": [{"id": "p00", "narracion": "Si vives en Cancún pagas más.", "visual": {"evidencia": ["e1"]}},
-                   # Las dos preguntas directas (15/10/2026): antes del segundo diez y a la mitad.
+                   # Las dos preguntas directas (14/10/2026): antes del segundo diez y a la mitad.
                    {"id": "p01", "narracion": "¿A ti ya te cobraron eso?", "visual": {"evidencia": ["e1"]}},
                    {"id": "p04", "narracion": "¿Tú lo hubieras pagado?", "visual": {"evidencia": ["e1"]}},
                    {"id": "p08", "seccion": "identidad_cierre", "narracion": "Aquí el dato mata al gato.",

@@ -19,7 +19,7 @@ def test_instruccion_por_vigencia():
     noticia = instruccion_cercania.instruccion("cancun", 3, "-", vigencia="noticia",
                                                hoy=datetime(2026, 10, 14).date())
     perenne = instruccion_cercania.instruccion("cancun", 2, "-", vigencia="perenne")
-    # Desde el 15/10/2026: tema de este mes que hace hablar (antes, noticia de 2 días).
+    # Desde el 14/10/2026: tema de este mes que hace hablar (antes, noticia de 2 días).
     assert "ESTÁ HABLANDO" in noticia and "14/09/2026" in noticia and "HACE HABLAR" in noticia
     assert "SIGUE PASANDO" in perenne and "ESTÁ HABLANDO" not in perenne
     assert "DOS PREGUNTAS directas" in noticia and "DOS PREGUNTAS directas" in perenne
