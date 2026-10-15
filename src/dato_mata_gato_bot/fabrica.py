@@ -78,7 +78,7 @@ def guardar(lote: str, estado: dict) -> None:
 def crear(lote: str, objetivo: int, formato: str = "cercania", **opciones) -> dict:
     """`opciones` (modo automático de /lotegrande, 14/10/2026): horas_claude
     ("" = todo el día, "0-9"), tema (una clave de instruccion_cercania o None =
-    repartido), por_tanda, colchon y vigencias (mezcla noticia/perenne)."""
+    repartido), por_tanda, colchon y vigencias (mezcla conversacion/perenne)."""
     ruta = ruta_estado(lote)
     if ruta.exists():
         raise FileExistsError(f"Ya existe la fábrica '{lote}': {ruta}")
@@ -99,8 +99,8 @@ def pendientes(estado: dict) -> list[str]:
     """Los que faltan, en el orden en que se escribieron. Un fallido con
     intentos de sobra vuelve a la fila, pero DETRÁS de los nuevos."""
     nuevos = [s for s, v in estado["videos"].items() if v["estado"] == "pendiente"]
-    # Las noticias caducan (no más de dos días): van antes que las perennes.
-    nuevos.sort(key=lambda s: estado["videos"][s].get("vigencia") != "noticia")
+    # Los temas de conversación son de este mes: van antes que las perennes.
+    nuevos.sort(key=lambda s: estado["videos"][s].get("vigencia") not in ("conversacion", "noticia"))
     reintentos = [s for s, v in estado["videos"].items()
                   if v["estado"] == "fallido" and v["intentos"] < MAX_INTENTOS]
     return nuevos + reintentos
@@ -325,7 +325,7 @@ _TIEMPO_RELATIVO = re.compile(
 
 
 def problemas_de_vigencia(guion: dict, vigencia: str | None = None, hoy: datetime | None = None) -> list[str]:
-    """Las reglas de noticia/perenne y de "que envejezca bien"."""
+    """Las reglas de conversacion/perenne y de "que envejezca bien"."""
     from dato_mata_gato_bot import instruccion_cercania
 
     out = []
@@ -338,9 +338,9 @@ def problemas_de_vigencia(guion: dict, vigencia: str | None = None, hoy: datetim
     escrita = str(schema.get("vigencia", "")).strip().lower()
     if vigencia and escrita != vigencia:
         out.append(f'_schema.vigencia tiene que ser "{vigencia}" (dice "{escrita or "nada"}")')
-    if (vigencia or escrita) == "noticia":
+    if (vigencia or escrita) == "conversacion":
         if not str(schema.get("impacto", "")).strip():
-            out.append('falta "_schema.impacto": de dónde sale que la noticia movió al público '
+            out.append('falta "_schema.impacto": de dónde sale que la gente está hablando de esto '
                        "(lo más leído, comentarios, varios medios)")
         texto = str((schema.get("condiciones") or {}).get("2_esta_pasando_ahorita", ""))
         fechas = []
@@ -354,7 +354,7 @@ def problemas_de_vigencia(guion: dict, vigencia: str | None = None, hoy: datetim
         if not fechas:
             out.append("en _schema.condiciones.2_esta_pasando_ahorita falta la fecha de la nota (DD/MM/AAAA)")
         elif max(fechas) < limite:
-            out.append(f"la noticia es del {max(fechas):%d/%m/%Y}: tiene que ser del {limite:%d/%m/%Y} o "
+            out.append(f"el dato es del {max(fechas):%d/%m/%Y}: tiene que ser del {limite:%d/%m/%Y} o "
                        "más nueva. Busca otra de los últimos dos días")
     return out
 
@@ -363,7 +363,7 @@ def problemas_cercania(slug: str, vigencia: str | None = None) -> list[str]:
     """Revisión sin Claude de un guion de cercanía: lugar exacto y evidencia
     real (las reglas de revision_guion, sin el mínimo de 3 nombres del true
     crime), las CUATRO condiciones de la fórmula escritas en el guion y, desde
-    el 14/10/2026, las reglas de noticia/perenne y de que envejezca bien."""
+    el 14/10/2026, las reglas de conversacion/perenne y de que envejezca bien."""
     from dato_mata_gato_bot import revision_guion
 
     try:
@@ -457,7 +457,7 @@ def escribir_tanda(estado: dict) -> tuple[list[str], str | None]:
         temas = ([(estado["tema"], cuantos)] if estado.get("tema")
                  else instruccion_cercania.repartir(cuantos, conteo))
         if estado.get("vigencias"):
-            # Mezcla noticia/perenne (3:2) sobre lo que ya lleva el lote.
+            # Mezcla conversación/perenne (3:2) sobre lo que ya lleva el lote.
             ya: dict = {}
             for v in estado["videos"].values():
                 ya[v.get("vigencia")] = ya.get(v.get("vigencia"), 0) + 1
@@ -613,7 +613,7 @@ def video(lote: str, slug: str) -> None:
                         "-c:v", "libx264", "-crf", "28", "-c:a", "aac", "-b:a", "128k",
                         "-movflags", "+faststart", str(liviano)], check=False, creationflags=_SIN_VENTANA)
         vig = estado["videos"].get(slug, {}).get("vigencia", "")
-        etiqueta = {"noticia": "📰 ACTUAL: publícala primero", "perenne": "🌲 PERENNE"}.get(vig, "")
+        etiqueta = {"conversacion": "💬 CONVERSACIÓN: publícala primero", "perenne": "🌲 PERENNE"}.get(vig, "")
         telegram(f"🎬 {slug} ({(time.time() - inicio) / 60:.0f} min)" + (f"\n{etiqueta}" if etiqueta else "")
                  + f"\n{r.mensaje[-700:]}", liviano if liviano.exists() else None)
         # La portada (estilo A, la nota) para subirla al publicar; ya va en el primer cuadro.

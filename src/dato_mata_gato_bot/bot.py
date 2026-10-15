@@ -579,7 +579,7 @@ HELP_TEXT = """Comandos disponibles — flujo típico: /nuevovideo → mandar gu
   la contradicción local (te afecta + ahorita + no cuadra + coraje), sin
   presentador. Ejemplo: /lotegrande 5 cancun
   AUTOMÁTICO: con "dia" (todo el día) o un horario ("0-9" = Claude solo de 0 a
-  9 h), la fábrica escribe Y genera sola, 3 noticias (de no más de 2 días) por
+  9 h), la fábrica escribe Y genera sola, 3 temas de conversación (de este mes) por
   cada 2 perennes, y sigue sola si se acaba la cuota. Los videos te llegan aquí
   y se archivan sin publicar. Ejemplos: /lotegrande 20 dia
   /lotegrande 15 0-9 cancun · Estado: /fabrica · Detener: /pararfabrica
@@ -1069,9 +1069,9 @@ async def cmd_lotegrande(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if tema:
         # Con tema (13/10/2026): la fórmula de la contradicción local, la misma
         # de la fábrica, escrita en la sesión ligera. Sin presentador.
-        # 3 noticias : 2 perennes, igual que la fábrica (14/10/2026).
+        # 3 de conversación : 2 perennes, igual que la fábrica (14/10/2026).
         await _pedir_lote(update, context,
-                          lambda k: [(f"{CERCANIA}{tema}:{v}", f"{v}s de {temas[tema]}", c)
+                          lambda k: [(f"{CERCANIA}{tema}:{v}", f"{instruccion_cercania.NOMBRES[v][1]} de {temas[tema]}", c)
                                      for v, c in instruccion_cercania.repartir_vigencias(k)],
                           cantidad=n, sin_avatar=True)
         return
@@ -1083,7 +1083,7 @@ CERCANIA = "cercania:"
 
 # Modo automático de /lotegrande (14/10/2026): la fábrica escribe y genera sola.
 # Por ventana de 5 h se escriben los que alcanzan a generarse (un video tarda
-# 40-45 min, casi todo la voz), así nunca se acumulan noticias que caducan.
+# 40-45 min, casi todo la voz), así no se acumulan temas que se enfrían.
 _VIDEOS_POR_VENTANA = int(os.getenv("FABRICA_VIDEOS_5H") or 6)
 _FABRICA_CLI = Path(__file__).resolve().parents[2] / "tools" / "fabrica.py"
 
@@ -1106,7 +1106,7 @@ def _fabricas_activas() -> list[dict]:
 
 async def _lotegrande_automatico(update: Update, n: int, horario: str, tema: str | None) -> None:
     """/lotegrande 20 dia [tema] o /lotegrande 20 0-9 [tema]: crea una fábrica
-    que escribe Y genera sola (3 noticias de no más de dos días : 2 perennes),
+    que escribe Y genera sola (3 temas de conversación : 2 perennes),
     se reanuda tras el límite de Claude y archiva sin publicar."""
     import subprocess
     import sys
@@ -1137,8 +1137,8 @@ async def _lotegrande_automatico(update: Update, n: int, horario: str, tema: str
     await update.message.reply_text(
         f"🏭 Fábrica {lote} en marcha: {n} videos.\n"
         f"• Tema: {temas[tema] if tema else 'repartido entre ' + ', '.join(temas)}\n"
-        "• Mezcla: " + " + ".join(f"{k} {v}s" for v, k in mezcla) + " (las noticias: temas de este mes "
-        "que hacen hablar, con dos preguntas directas a quien ve)\n"
+        "• Mezcla: " + " + ".join(f"{k} {instruccion_cercania.NOMBRES[v][1 if k > 1 else 0]}" for v, k in mezcla)
+        + " (temas de este mes que hacen hablar; todos con dos preguntas directas a quien ve)\n"
         f"• Claude escribe {'todo el día' if not horario else f'solo de {horario} h'}, hasta "
         f"{_VIDEOS_POR_VENTANA} guiones por ventana de 5 h (lo que alcanza a generarse).\n"
         f"• Si se acaba la cuota, sigue generando lo escrito y retoma sola.\n"

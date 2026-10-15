@@ -1,4 +1,4 @@
-"""Modo automático de /lotegrande, noticia/perenne y "que envejezca bien" (14/10/2026)."""
+"""Modo automático de /lotegrande, conversación/perenne y "que envejezca bien" (14/10/2026)."""
 
 import asyncio
 import json
@@ -9,14 +9,14 @@ from dato_mata_gato_bot import bot, fabrica, instruccion_cercania
 
 
 def test_mezcla_tres_noticias_por_dos_perennes():
-    assert instruccion_cercania.repartir_vigencias(5) == [("noticia", 3), ("perenne", 2)]
-    assert dict(instruccion_cercania.repartir_vigencias(20)) == {"noticia": 12, "perenne": 8}
+    assert instruccion_cercania.repartir_vigencias(5) == [("conversacion", 3), ("perenne", 2)]
+    assert dict(instruccion_cercania.repartir_vigencias(20)) == {"conversacion": 12, "perenne": 8}
     # Compensa lo que ya hay: si sobran noticias, la tanda va a perennes.
-    assert dict(instruccion_cercania.repartir_vigencias(2, {"noticia": 5, "perenne": 0})) == {"perenne": 2}
+    assert dict(instruccion_cercania.repartir_vigencias(2, {"conversacion": 5, "perenne": 0})) == {"perenne": 2}
 
 
 def test_instruccion_por_vigencia():
-    noticia = instruccion_cercania.instruccion("cancun", 3, "-", vigencia="noticia",
+    noticia = instruccion_cercania.instruccion("cancun", 3, "-", vigencia="conversacion",
                                                hoy=datetime(2026, 10, 14).date())
     perenne = instruccion_cercania.instruccion("cancun", 2, "-", vigencia="perenne")
     # Desde el 14/10/2026: tema de este mes que hace hablar (antes, noticia de 2 días).
@@ -39,14 +39,14 @@ def test_tiempo_relativo_en_la_voz():
 
 def test_noticia_de_mas_de_un_mes_no_pasa():
     hoy = datetime(2026, 10, 14, 9)
-    vieja = _guion("x", vigencia="noticia", impacto="lo más leído de PorEsto",
+    vieja = _guion("x", vigencia="conversacion", impacto="lo más leído de PorEsto",
                    condiciones={"2_esta_pasando_ahorita": "PorEsto, 10/09/2026: cerró."})
-    nueva = _guion("x", vigencia="noticia", impacto="lo más leído de PorEsto",
+    nueva = _guion("x", vigencia="conversacion", impacto="lo más leído de PorEsto",
                    condiciones={"2_esta_pasando_ahorita": "PorEsto, 12/10/2026: cerró."})
-    assert any("10/09/2026" in p for p in fabrica.problemas_de_vigencia(vieja, "noticia", hoy))
-    assert fabrica.problemas_de_vigencia(nueva, "noticia", hoy) == []
-    sin_impacto = _guion("x", vigencia="noticia", condiciones={"2_esta_pasando_ahorita": "13/10/2026"})
-    assert any("impacto" in p for p in fabrica.problemas_de_vigencia(sin_impacto, "noticia", hoy))
+    assert any("10/09/2026" in p for p in fabrica.problemas_de_vigencia(vieja, "conversacion", hoy))
+    assert fabrica.problemas_de_vigencia(nueva, "conversacion", hoy) == []
+    sin_impacto = _guion("x", vigencia="conversacion", condiciones={"2_esta_pasando_ahorita": "13/10/2026"})
+    assert any("impacto" in p for p in fabrica.problemas_de_vigencia(sin_impacto, "conversacion", hoy))
     assert any('"perenne"' in p for p in fabrica.problemas_de_vigencia(nueva, "perenne", hoy))
 
 
@@ -59,7 +59,7 @@ def test_aviso_de_limite_semanal():
 
 def test_noticias_primero_en_la_fila():
     estado = {"videos": {"a": {"estado": "pendiente", "intentos": 0, "vigencia": "perenne"},
-                         "b": {"estado": "pendiente", "intentos": 0, "vigencia": "noticia"},
+                         "b": {"estado": "pendiente", "intentos": 0, "vigencia": "conversacion"},
                          "c": {"estado": "pendiente", "intentos": 0, "vigencia": "perenne"}}}
     assert fabrica.pendientes(estado) == ["b", "a", "c"]
 
@@ -76,8 +76,8 @@ def test_tanda_automatica_reparte_vigencias(monkeypatch):
               "tema": "cancun", "por_tanda": 6, "vigencias": True}
     nuevos, limite = fabrica.escribir_tanda(estado)
     assert limite is None and len(nuevos) == 6
-    assert sorted(pedidos) == [("cancun", "noticia", 4), ("cancun", "perenne", 2)]
-    assert estado["_vigencias"]["guion-cancun-noticia-0"] == "noticia"
+    assert sorted(pedidos) == [("cancun", "conversacion", 4), ("cancun", "perenne", 2)]
+    assert estado["_vigencias"]["guion-cancun-conversacion-0"] == "conversacion"
 
 
 def test_lotegrande_automatico_crea_la_fabrica(tmp_path, monkeypatch):
@@ -99,7 +99,7 @@ def test_lotegrande_automatico_crea_la_fabrica(tmp_path, monkeypatch):
     e = json.loads(estados[0].read_text(encoding="utf-8"))
     assert (e["objetivo"], e["horas_claude"], e["tema"], e["vigencias"]) == (20, "0-9", "cancun", True)
     assert lanzados and lanzados[0][-2:] == ["ciclo", e["lote"]]
-    assert "12 noticias + 8 perennes" in respuestas[0]
+    assert "12 conversaciones + 8 perennes" in respuestas[0]
 
     # Con una activa no se crea otra: comparten la voz.
     asyncio.run(bot.cmd_lotegrande(update, SimpleNamespace(args=["5", "dia"])))

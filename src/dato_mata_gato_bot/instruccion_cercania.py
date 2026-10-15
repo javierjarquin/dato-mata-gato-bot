@@ -14,25 +14,25 @@ México, terror, "la historia de" y casos tipo Marfil.
 
 TEMAS = [
     ("cancun", "Cancún y Quintana Roo",
-     "Una noticia de esta semana o este mes en Cancún o Quintana Roo que le afecte a casi "
+     "Un tema de este mes en Cancún o Quintana Roo del que la gente está hablando y que le afecte a casi "
      "cualquiera que vive ahí: el bolsillo (precios, recibos, gasolina, rentas), los servicios "
      "(agua, luz, transporte, salud, basura) o el entorno (playas, manglar, sargazo, laguna). Con "
      "un responsable claro (empresa, autoridad, constructora). El trasfondo: de dónde viene el "
      "problema (cuándo empezó, qué se prometió, qué pasó antes)."),
     ("cdmx", "Ciudad de México",
-     "Una noticia de esta semana o este mes en la Ciudad de México que le toque a quien vive ahí "
+     "Un tema de este mes en la Ciudad de México del que la gente está hablando y que le toque a quien vive ahí "
      "(Metro, agua, colonias, sismos, transporte, precios), con su trasfondo histórico: el hecho "
      "del pasado de la ciudad que explica lo de hoy o que se repite."),
     ("terror", "Terror basado en hechos reales",
-     "Una noticia reciente (un estreno, una serie, un aniversario, un hallazgo, un juicio) que "
+     "Algo reciente que hace hablar (un estreno, una serie, un aniversario, un hallazgo, un juicio) que "
      "conecte con el CASO REAL que inspiró una película o leyenda de terror. El trasfondo es el "
      "caso documentado: qué está probado y qué es leyenda, dicho así."),
     ("historia", "La historia de…",
-     "Una noticia reciente de México que reabre un hecho histórico (un aniversario, un hallazgo, "
+     "Algo reciente de México que reabre un hecho histórico y hace hablar (un aniversario, un hallazgo, "
      "una ley, una demolición, un juicio). El título empieza con 'La historia de'. El trasfondo "
      "es el hecho histórico con sus fechas y nombres verificados."),
     ("marfil", "Secuestros y herederos (tipo Marfil)",
-     "Una noticia reciente de un secuestro, una herencia en disputa o una familia poderosa, "
+     "Un caso reciente que hace hablar: un secuestro, una herencia en disputa o una familia poderosa, "
      "conectada con un caso histórico parecido y documentado (México primero; si es de fuera, "
      "muy conocido). Nunca víctimas menores de edad con nombre. Del acusado sin sentencia se "
      "dice el hecho procesal, no la culpa."),
@@ -76,7 +76,7 @@ La narración le HABLA a esa persona: "tu recibo", "tu colonia", "si vives en…
 que cargues gasolina…". El "te imaginas a quien…" de p01 es alguien como ella. El gancho (p00)
 junta 1 y 3: el dato que la toca, con lo que no cuadra.
 En "_schema.condiciones" escribe, una por una, cómo cumple el guion cada pieza (con la fecha
-de la noticia en la 2). Un guion al que le falte una se descarta en la revisión.
+del dato en la 2). Un guion al que le falte una se descarta en la revisión.
 En los temas que no son locales (terror, "la historia de", tipo Marfil), la 1 es que le toque a
 quien vive en México hoy, y la 5 que haya un lugar, un objeto o un documento real que mostrar.
 
@@ -103,7 +103,7 @@ QUE ENVEJEZCA BIEN (el video se va a ver semanas o meses después, sobre todo po
   - En "_schema.vigencia" escribe "<<VIGENCIA>>".
 
 VERIFICACIÓN (lo más importante: si un dato no se puede verificar, NO va)
-1. Busca la noticia reciente y ÁBRELA (WebFetch). No te quedes con el resumen del buscador:
+1. Busca las notas del tema y ÁBRELAS (WebFetch). No te quedes con el resumen del buscador:
    los resúmenes inventan cifras. Cada cifra, fecha y nombre del guion tiene que estar en
    una nota o documento que abriste y leíste.
 2. Lo que solo dice UNA fuente va atribuido en la narración ("según PorEsto…"), también en el
@@ -126,7 +126,7 @@ ESTRUCTURA (9 planos, ids p00 a p08)
   cobraron eso?", "¿Sabes cuánto pagas tú?"), y otra a la mitad, en p03, p04 o p05 ("¿Tú
   hubieras firmado?"). Cortas, con "¿…?", y le hablan de tú. Enganchan: la persona se
   pregunta por su propio caso y se queda a ver qué pasa.
-- p02 "contexto", p03 "el_hecho", p04 "bucle_abierto", p05 "el_desenlace": la noticia con sus
+- p02 "contexto", p03 "el_hecho", p04 "bucle_abierto", p05 "el_desenlace": el tema con sus
   cifras y nombres, atribuidos.
 - p06 "contexto": el TRASFONDO histórico (cuándo empezó, qué pasó antes).
 - p07 "cierre_bucle": vuelve a la pregunta abierta y cierra con la frase más fuerte, sin moraleja.
@@ -163,7 +163,7 @@ FORMATO DE CADA GUION
 Escríbelo en C:\Android_in\<slug>\guion.json, con slug "guion-<<CLAVE>>-" + palabras cortas
 del tema (minúsculas y guiones). Así, como en este ejemplo real (recortado a 2 planos):
 {
-  "_schema": {"descripcion": "Short de Dato Mata Gato, fórmula de cercanía: noticia reciente +
+  "_schema": {"descripcion": "Short de Dato Mata Gato, fórmula de cercanía: tema que hace hablar +
                trasfondo histórico.", "fuentes": {"precio": "URL (lo que dice)"},
               "condiciones": {"1_te_afecta": "Todo el que tiene coche o usa taxi en Cancún.",
                               "2_esta_pasando_ahorita": "PorEsto, 29/09/2026: la Magna llegó a 25.39.",
@@ -246,11 +246,13 @@ CÓMO TRABAJAR (cada respuesta tuya relee todo lo anterior: menos respuestas = m
 
 
 # La pieza 2 cambia según el tipo de video (Javier, 14/10/2026): 3 de cada 5 son
-# "noticia" y 2 perennes, que siguen siendo verdad en meses. Desde el 14/10 la
-# "noticia" es un tema que está pasando y hace hablar, con dato de este mes (ya
+# "conversacion" y 2 perennes, que siguen siendo verdad en meses. Desde el 14/10 ya
+# no hay noticias (Javier): "conversacion" es un tema que está pasando y hace hablar, con dato de este mes (ya
 # no lo más nuevo de dos días): "2000 despedidos" fue lo que más conversación dio.
-VIGENCIAS = ("noticia", "perenne")
-MEZCLA = {"noticia": 3, "perenne": 2}
+VIGENCIAS = ("conversacion", "perenne")
+MEZCLA = {"conversacion": 3, "perenne": 2}
+# Para mostrar: singular y plural.
+NOMBRES = {"conversacion": ("conversación", "conversaciones"), "perenne": ("perenne", "perennes")}
 DIAS_NOTICIA = 30  # "dato de este mes"; antes 2 días (14/10), Javier lo relajó ese mismo día
 
 _AHORITA = {
@@ -258,7 +260,7 @@ _AHORITA = {
      ya pasó). Noticia de esta semana o de este mes, con fecha en la nota. Por eso Aguakan pegó
      y el subsidio de la luz no.
 """,
-    "noticia": """  2. ESTÁ PASANDO AHORITA (saliencia o actualidad: lo de ahorita pesa más que lo que pasará o
+    "conversacion": """  2. ESTÁ PASANDO AHORITA (saliencia o actualidad: lo de ahorita pesa más que lo que pasará o
      ya pasó). Un tema que ESTÁ PASANDO y del que la gente ESTÁ HABLANDO, con un dato de este
      mes: fecha en la nota del <<DESDE>> o después. No tiene que ser la nota más nueva (Javier,
      14/10/2026: "ya no tanto por noticia"): vale más uno que hace hablar (pieza 6) que uno de
@@ -277,7 +279,7 @@ _AHORITA = {
 
 
 def repartir_vigencias(n: int, conteo: dict[str, int] | None = None) -> list[tuple[str, int]]:
-    """n guiones repartidos 3 noticias : 2 perennes, compensando lo que ya hay
+    """n guiones repartidos 3 de conversación : 2 perennes, compensando lo que ya hay
     (como `repartir` con los temas). 5 -> 3 + 2; 1 -> el que vaya atrás."""
     cuenta = {v: (conteo or {}).get(v, 0) for v in VIGENCIAS}
     pedidos = {v: 0 for v in VIGENCIAS}
@@ -295,7 +297,7 @@ def instruccion(clave: str, n: int, ya_hechos: str, ligera: bool = False,
     tema = next(t for t in TEMAS if t[0] == clave)
     desde = (hoy or date.today()) - timedelta(days=DIAS_NOTICIA)
     texto = (INSTRUCCION.replace("<<AHORITA>>", _AHORITA[vigencia]).replace("<<DESDE>>", f"{desde:%d/%m/%Y}")
-             .replace("<<VIGENCIA>>", vigencia or "noticia o perenne")
+             .replace("<<VIGENCIA>>", vigencia or "conversacion o perenne")
              .replace("<<N>>", str(n)).replace("<<TEMA>>", tema[1])
              .replace("<<DESCRIPCION>>", tema[2]).replace("<<CLAVE>>", tema[0]))
     if ligera:
