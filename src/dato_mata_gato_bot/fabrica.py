@@ -298,7 +298,20 @@ def _latir(lote: str, parar: threading.Event) -> None:
 # + está pasando ahorita (actualidad) + algo no cuadra (brecha de curiosidad) + coraje
 # (indignación moral), y además que se pueda grabar o mostrar.
 CONDICIONES = ("1_te_afecta", "2_esta_pasando_ahorita", "3_algo_no_cuadra", "4_coraje",
-               "5_se_puede_grabar")
+               "5_se_puede_grabar", "6_hace_hablar")
+
+
+def problemas_de_preguntas(guion: dict) -> list[str]:
+    """Dos preguntas directas a quien ve (15/10/2026, idea de Javier): una antes
+    del segundo diez (p01 o p02) y otra a la mitad (p03 a p05). Enganchan con
+    su propio caso y dejan la respuesta lista para los comentarios."""
+    narr = {p.get("id"): p.get("narracion", "") for p in guion.get("planos", [])}
+    out = []
+    for planos, cuando in ((("p01", "p02"), "antes del segundo diez (p01 o p02)"),
+                           (("p03", "p04", "p05"), "a la mitad (p03, p04 o p05)")):
+        if not any(re.search(r"¿[^?]{3,}\?", narr.get(p, "")) for p in planos):
+            out.append(f"falta una pregunta directa a quien ve {cuando}, sobre SU caso, con ¿…?")
+    return out
 
 
 # Que el video envejezca bien (14/10/2026): en la voz no va tiempo relativo,
@@ -363,7 +376,7 @@ def problemas_cercania(slug: str, vigencia: str | None = None) -> list[str]:
     if faltan:
         out.append("no explica cómo cumple estas piezas de la fórmula en _schema.condiciones: "
                    + ", ".join(faltan) + ". Si le falta una, cambia el tema por otro que las tenga todas")
-    return out + problemas_de_vigencia(guion, vigencia)
+    return out + problemas_de_vigencia(guion, vigencia) + problemas_de_preguntas(guion)
 
 
 def sesion_ligera() -> bool:
@@ -600,7 +613,7 @@ def video(lote: str, slug: str) -> None:
                         "-c:v", "libx264", "-crf", "28", "-c:a", "aac", "-b:a", "128k",
                         "-movflags", "+faststart", str(liviano)], check=False, creationflags=_SIN_VENTANA)
         vig = estado["videos"].get(slug, {}).get("vigencia", "")
-        etiqueta = {"noticia": "📰 NOTICIA: publícala pronto, caduca", "perenne": "🌲 PERENNE"}.get(vig, "")
+        etiqueta = {"noticia": "📰 ACTUAL: publícala primero", "perenne": "🌲 PERENNE"}.get(vig, "")
         telegram(f"🎬 {slug} ({(time.time() - inicio) / 60:.0f} min)" + (f"\n{etiqueta}" if etiqueta else "")
                  + f"\n{r.mensaje[-700:]}", liviano if liviano.exists() else None)
         # La portada (estilo A, la nota) para subirla al publicar; ya va en el primer cuadro.

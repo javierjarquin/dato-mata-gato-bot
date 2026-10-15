@@ -1137,8 +1137,8 @@ async def _lotegrande_automatico(update: Update, n: int, horario: str, tema: str
     await update.message.reply_text(
         f"🏭 Fábrica {lote} en marcha: {n} videos.\n"
         f"• Tema: {temas[tema] if tema else 'repartido entre ' + ', '.join(temas)}\n"
-        "• Mezcla: " + " + ".join(f"{k} {v}s" for v, k in mezcla) + " (noticias de no más de 2 días y "
-        "de las que más movieron al público)\n"
+        "• Mezcla: " + " + ".join(f"{k} {v}s" for v, k in mezcla) + " (las noticias: temas de este mes "
+        "que hacen hablar, con dos preguntas directas a quien ve)\n"
         f"• Claude escribe {'todo el día' if not horario else f'solo de {horario} h'}, hasta "
         f"{_VIDEOS_POR_VENTANA} guiones por ventana de 5 h (lo que alcanza a generarse).\n"
         f"• Si se acaba la cuota, sigue generando lo escrito y retoma sola.\n"

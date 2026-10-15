@@ -19,8 +19,10 @@ def test_instruccion_por_vigencia():
     noticia = instruccion_cercania.instruccion("cancun", 3, "-", vigencia="noticia",
                                                hoy=datetime(2026, 10, 14).date())
     perenne = instruccion_cercania.instruccion("cancun", 2, "-", vigencia="perenne")
-    assert "últimos DOS días" in noticia and "12/10/2026" in noticia and "lo más leído" in noticia
-    assert "SIGUE PASANDO" in perenne and "DOS días" not in perenne
+    # Desde el 15/10/2026: tema de este mes que hace hablar (antes, noticia de 2 días).
+    assert "ESTÁ HABLANDO" in noticia and "14/09/2026" in noticia and "HACE HABLAR" in noticia
+    assert "SIGUE PASANDO" in perenne and "ESTÁ HABLANDO" not in perenne
+    assert "DOS PREGUNTAS directas" in noticia and "DOS PREGUNTAS directas" in perenne
     for t in (noticia, perenne):
         assert "QUE ENVEJEZCA BIEN" in t and "VALOR PRÁCTICO" in t and "<<" not in t
 
@@ -35,13 +37,13 @@ def test_tiempo_relativo_en_la_voz():
     assert fabrica.problemas_de_vigencia(_guion("Esa mañana, en octubre de dos mil veintiséis, cerró.")) == []
 
 
-def test_noticia_de_mas_de_dos_dias_no_pasa():
+def test_noticia_de_mas_de_un_mes_no_pasa():
     hoy = datetime(2026, 10, 14, 9)
     vieja = _guion("x", vigencia="noticia", impacto="lo más leído de PorEsto",
-                   condiciones={"2_esta_pasando_ahorita": "PorEsto, 10/10/2026: cerró."})
+                   condiciones={"2_esta_pasando_ahorita": "PorEsto, 10/09/2026: cerró."})
     nueva = _guion("x", vigencia="noticia", impacto="lo más leído de PorEsto",
                    condiciones={"2_esta_pasando_ahorita": "PorEsto, 12/10/2026: cerró."})
-    assert any("10/10/2026" in p for p in fabrica.problemas_de_vigencia(vieja, "noticia", hoy))
+    assert any("10/09/2026" in p for p in fabrica.problemas_de_vigencia(vieja, "noticia", hoy))
     assert fabrica.problemas_de_vigencia(nueva, "noticia", hoy) == []
     sin_impacto = _guion("x", vigencia="noticia", condiciones={"2_esta_pasando_ahorita": "13/10/2026"})
     assert any("impacto" in p for p in fabrica.problemas_de_vigencia(sin_impacto, "noticia", hoy))
@@ -114,3 +116,13 @@ def test_tanda_cortada_no_cuenta_para_la_ventana(monkeypatch):
     assert fabrica.puede_usar_claude(cortada, ahora) is None
     entera = {"horas_claude": "", "consumo": [{"t": "2026-10-14T09:13", "guiones": 6}]}
     assert "ya se pidieron" in fabrica.puede_usar_claude(entera, ahora)
+
+
+
+def test_dos_preguntas_directas():
+    planos = lambda **n: {"planos": [{"id": k, "narracion": v} for k, v in n.items()]}
+    assert fabrica.problemas_de_preguntas(planos(p01="¿A ti ya te cobraron?", p04="¿Tú pagarías?")) == []
+    sin_temprana = fabrica.problemas_de_preguntas(planos(p03="Nada.", p04="¿Tú pagarías?"))
+    assert len(sin_temprana) == 1 and "segundo diez" in sin_temprana[0]
+    sin_mitad = fabrica.problemas_de_preguntas(planos(p02="¿Y tú?, ¿lo sabías?"))
+    assert len(sin_mitad) == 1 and "mitad" in sin_mitad[0]
