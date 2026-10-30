@@ -149,6 +149,8 @@ def _guion_cercania(tmp_path, slug, condiciones):
     (tmp_path / slug).mkdir()
     (tmp_path / slug / "guion.json").write_text(json.dumps({
         "_schema": {"condiciones": condiciones},
+        "descripcion": "En Cancún pagas más por la gasolina aunque hay un acuerdo para que no pase. ¿A cuánto cargaste tú?",
+        "hashtags": ["#Cancun", "#Gasolina", "#Profeco", "#QuintanaRoo", "#DatoMataGato"],
         "evidencia": [{"id": "e1", "tipo": "prensa"}, {"id": "e2", "tipo": "lugar"},
                       {"id": "e3", "tipo": "documento"}],
         "planos": [{"id": "p00", "narracion": "Si vives en Cancún pagas más.", "visual": {"evidencia": ["e1"]}},
@@ -183,3 +185,45 @@ def test_reparto_de_temas_parejo_en_el_lote():
     for frase in ("TE AFECTA", "ESTÁ PASANDO AHORITA", "ALGO NO CUADRA", "CORAJE",
                   "SE PUEDE GRABAR", "MÁXIMO 12 PALABRAS", "Caso X", "guion-cancun-"):
         assert frase in texto
+
+
+def test_publicacion_pide_descripcion_y_cuatro_hashtags_utiles():
+    """20/10/2026: el buscador de TikTok lee la descripción; #fyp y #viral no cuentan."""
+    from dato_mata_gato_bot import fabrica as f
+    bien = {"descripcion": "En Cancún pagas más por la gasolina aunque hay un acuerdo. ¿A cuánto cargaste tú?",
+            "hashtags": ["#Cancun", "#Gasolina", "#Profeco", "#DatoMataGato"]}
+    assert f.problemas_de_publicacion(bien) == []
+    p = f.problemas_de_publicacion({"hashtags": ["#DatoMataGato", "#Cancun", "#fyp", "#viral"]})
+    assert len(p) == 2 and "descripcion" in p[0] and "2 hashtags" in p[1]
+
+
+def test_en_sesiones_reparte_de_a_dos(monkeypatch):
+    from dato_mata_gato_bot import fabrica as f
+    monkeypatch.delenv("FABRICA_GUIONES_POR_SESION", raising=False)
+    assert f.en_sesiones(5) == [2, 2, 1]
+    assert f.en_sesiones(0) == []
+    monkeypatch.setenv("FABRICA_GUIONES_POR_SESION", "5")
+    assert f.en_sesiones(5) == [5]
+
+
+def test_registro_detecta_espana_y_traduccion_pero_no_vale_la_pena():
+    """20/10/2026: los guiones sonaban a español neutro o de España."""
+    from dato_mata_gato_bot import fabrica as f
+    mal = {"planos": [{"id": "p03", "narracion": "Los llegados del extranjero cogieron el móvil. ¿Lo sabéis?"},
+                      {"id": "p04", "narracion": "Vale, aquí viene lo bueno."}]}
+    p = f.problemas_de_registro(mal)
+    assert len(p) == 2 and "los llegados" in p[0] and "móvil" in p[0] and "sabéis" in p[0]
+    bien = {"planos": [{"id": "p03", "narracion": "Y fíjate: vale la pena revisar tu recibo. ¿A poco no?"}]}
+    assert f.problemas_de_registro(bien) == []
+
+
+def test_pregunta_de_opcion_se_marca_y_la_de_si_o_no_no():
+    """21/10/2026: con la voz mexicana "¿A o B?" baja el tono y no suena a pregunta."""
+    from dato_mata_gato_bot import fabrica as f
+    mal = {"planos": [{"id": "p07", "narracion": "¿Fue un pleito de banqueta o fue discriminación?"},
+                      {"id": "p08", "narracion": "¿Fue humor? ¿O fue discriminación?"}]}
+    p = f.problemas_de_registro(mal)
+    assert len(p) == 2 and all("opción" in x for x in p)
+    bien = {"planos": [{"id": "p07", "narracion": "¿Fue un pleito de banqueta? ¿Tú crees que fue discriminación?"},
+                       {"id": "p01", "narracion": "¿A ti ya te lo dijeron? Cuéntamelo o compártelo."}]}
+    assert f.problemas_de_registro(bien) == []

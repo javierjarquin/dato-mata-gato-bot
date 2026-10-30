@@ -3,6 +3,7 @@ sesión por chat de Telegram para que la conversación tenga memoria real."""
 
 import json
 import logging
+import os
 import subprocess
 from dataclasses import dataclass
 
@@ -41,6 +42,12 @@ HERRAMIENTAS_LIGERAS = "WebSearch,WebFetch,Write,Read,Edit,Bash"
 # formato del guion), pero sin conectores MCP ni herramientas que no usa.
 # Medido: 39.9k -> 24.4k tokens fijos por paso.
 HERRAMIENTAS_RECORTADAS = "WebSearch,WebFetch,Write,Read,Edit,Bash,Glob,Grep"
+# Esfuerzo y modelo de la sesión ligera (20/10/2026). Medido en 7 días de
+# fábrica: el 46 % del gasto era salida (27k tokens por guion) y ~3/4 de esa
+# salida era razonamiento interno, con el esfuerzo por defecto. FABRICA_EFFORT
+# vacío = el de siempre; FABRICA_MODELO (p. ej. "sonnet") para el A/B de modelo.
+EFFORT_ESCRITURA = (os.getenv("FABRICA_EFFORT") or "medium").strip()
+MODELO_ESCRITURA = (os.getenv("FABRICA_MODELO") or "").strip()
 
 
 def carpeta_de_sesiones(cwd: str = CWD):
@@ -51,9 +58,16 @@ def carpeta_de_sesiones(cwd: str = CWD):
 
 def run_turn(session_id: str, message: str, is_new_session: bool, ligera: bool = False,
              recortada: bool = False) -> ClaudeTurnResult:
+    # El prompt va por STDIN, no como argumento (16/10/2026). Windows corta la
+    # línea de comandos en 32 767 caracteres y CreateProcess falla con
+    # "WinError 206: el nombre del archivo o la extensión es demasiado largo".
+    # El lote viral del 16/10 se topó ahí: 34 454 caracteres (24 604 de
+    # instrucción + 9 851 de la lista de guiones ya hechos, que crece con cada
+    # video). Reventaba ANTES de arrancar Claude, así que no quedaba sesión en
+    # disco ni mensaje de error: 17 ciclos seguidos sin escribir un solo guion.
     args = [
         CLAUDE_EXE,
-        "-p", message,
+        "-p",
         "--output-format", "json",
         "--permission-mode", "bypassPermissions",
     ]
@@ -61,6 +75,10 @@ def run_turn(session_id: str, message: str, is_new_session: bool, ligera: bool =
         args += ["--add-dir", d]
     if ligera:
         args += ["--tools", HERRAMIENTAS_LIGERAS, "--strict-mcp-config"]
+        if EFFORT_ESCRITURA:
+            args += ["--effort", EFFORT_ESCRITURA]
+        if MODELO_ESCRITURA:
+            args += ["--model", MODELO_ESCRITURA]
     elif recortada:
         args += ["--tools", HERRAMIENTAS_RECORTADAS, "--strict-mcp-config"]
     args += (["--session-id", session_id] if is_new_session else ["--resume", session_id])
@@ -72,8 +90,16 @@ def run_turn(session_id: str, message: str, is_new_session: bool, ligera: bool =
     logger.info("Invocando claude (nueva=%s, ligera=%s, session=%s)", is_new_session, ligera, session_id)
     try:
         proc = subprocess.run(
-            args, cwd=cwd, capture_output=True, text=True, encoding="utf-8",
+            args, cwd=cwd, input=message, capture_output=True, text=True, encoding="utf-8",
             timeout=SUBPROCESS_TIMEOUT_SECONDS,
+            # Sin memoria automática en la sesión ligera (29/10/2026): leer y
+            # escribir sus .md era el 10 % del gasto de la fábrica. Lo que
+            # aprende un guion va al código o a la instrucción, no ahí.
+            # PYTHONWARNINGS: el FutureWarning de google.api_core (~400 letras)
+            # salía al inicio de cada revisar/fotos/buscar y Claude lo releía en
+            # todos los pasos que seguían (auditoría del 29/10/2026).
+            env={**os.environ, "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+                 "PYTHONWARNINGS": "ignore::FutureWarning"} if ligera else None,
             # claude.exe es una app de consola; sin esto, al lanzarla desde
             # pythonw.exe (sin consola) Windows le abre una ventana visible
             # que el usuario puede cerrar por error y matar la generación.
@@ -129,6 +155,11 @@ def _parse_output(stdout: str) -> ClaudeTurnResult:
     try:
         data = json.loads(stdout)
         text = data.get("result") or data.get("text") or stdout
+        # Claude puede salir con código 0 y traer el error DENTRO del JSON
+        # (is_error). Sin mirarlo, el lote tomaba eso por un turno bueno, no
+        # encontraba guiones y seguía como si nada: otro fallo mudo.
+        if data.get("is_error"):
+            return ClaudeTurnResult(ok=False, text=f"Claude devolvió un error: {text}", raw=stdout)
         return ClaudeTurnResult(ok=True, text=text, raw=stdout)
     except json.JSONDecodeError:
         return ClaudeTurnResult(ok=True, text=stdout.strip(), raw=stdout)

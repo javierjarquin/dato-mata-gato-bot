@@ -50,6 +50,7 @@ def test_instruccion_ligera_conserva_la_formula_y_agrega_como_trabajar():
     ligera = instruccion_cercania.instruccion("cancun", 1, "(ninguno)", ligera=True)
     assert "CÓMO TRABAJAR" not in normal and "CÓMO TRABAJAR" in ligera
     assert "herramientas_guion fotos" in ligera and "herramientas_guion revisar" in ligera
+    assert "expediente buscar" in ligera and "curl" in ligera
     assert "api.php?action=query" not in ligera
     for pieza in ("LA CONTRADICCIÓN LOCAL", "1. TE AFECTA", "4. CORAJE", "VERIFICACIÓN", "ESTRUCTURA (9 planos"):
         assert pieza in ligera
@@ -112,8 +113,9 @@ def test_lotegrande_con_tema_usa_la_formula_de_cercania(monkeypatch):
         assert pedido["kw"]["sin_avatar"] is True
 
 
-def test_lotegrande_sin_tema_sigue_variado(monkeypatch):
-    pedido, _ = _lotegrande(monkeypatch, ["4"])
+def test_lotegrande_variado_sigue_igual(monkeypatch):
+    # Desde el 20/10/2026 el lote viejo de crimen + trivia se pide con "variado".
+    pedido, _ = _lotegrande(monkeypatch, ["4", "variado"])
     assert not any(t.startswith("cercania:") for t, _, _ in pedido["tramos"])
     assert sum(c for _, _, c in pedido["tramos"]) == 4
 
@@ -133,7 +135,8 @@ def test_plus_bien_formado_pasa():
             "mapa": {"plano": "p02", "consulta": "Supermanzana 65, Cancún", "etiqueta": "SM 65 · CANCÚN"},
             "contradiccion": {"plano": "p04", "arriba": {"titulo": "A", "renglones": ["Hospital prometido"]},
                               "abajo": {"titulo": "B", "renglones": ["Sin fecha de apertura"]},
-                              "abajo_en": "anuncios", "resaltar": "Sin fecha de apertura", "fuente": "X"}}
+                              "abajo_en": "anuncios", "resaltar": "Sin fecha de apertura", "fuente": "X"},
+            "portada": {"texto": "EL HOSPITAL QUE NO ABRE", "resalta": "NO ABRE"}}
     assert herramientas_guion.problemas_de_plus(_guion_con_plus(plus)) == []
 
 
@@ -144,6 +147,14 @@ def test_plus_con_errores_se_explica():
                               "abajo": {"renglones": ["x" * 40]}, "abajo_en": "nunca", "resaltar": "otro"}}
     out = " | ".join(herramientas_guion.problemas_de_plus(_guion_con_plus(plus)))
     for pista in ("numero tiene que ser un número", 'mapa.plano "p12"', "consulta está vacía",
-                  "uno de p01 a p07", "arriba: de 1 a 3", "pasa de 36 letras", "resaltar tiene que ser"):
+                  "uno de p01 a p07", "arriba: de 1 a 3", "pasa de 36 letras", "resaltar tiene que ser",
+                  "plus.portada falta"):
         assert pista in out
     assert herramientas_guion.problemas_de_plus({"planos": []})[0].startswith('falta "plus"')
+
+
+def test_portada_larga_o_resalta_ajeno_se_explica():
+    plus = {"mapa": {"plano": "p02", "consulta": "Cancún", "etiqueta": "CANCÚN"},
+            "portada": {"texto": "EL HOSPITAL PROMETIDO QUE NUNCA ABRIÓ EN CANCÚN", "resalta": "CERRADO"}}
+    out = " | ".join(herramientas_guion.problemas_de_plus(_guion_con_plus(plus)))
+    assert "de 3 a 5 palabras (trae 8)" in out and "plus.portada.resalta" in out

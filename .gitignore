@@ -11,3 +11,6 @@ venv/
 data/
 *.log
 credentials/
+
+# Expedientes que escribe test_expediente (CARPETA apuntada aquí)
+tests/_no_existe/

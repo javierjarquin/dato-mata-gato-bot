@@ -76,7 +76,9 @@ def test_tanda_automatica_reparte_vigencias(monkeypatch):
               "tema": "cancun", "por_tanda": 6, "vigencias": True}
     nuevos, limite = fabrica.escribir_tanda(estado)
     assert limite is None and len(nuevos) == 6
-    assert sorted(pedidos) == [("cancun", "conversacion", 4), ("cancun", "perenne", 2)]
+    # De a dos por sesión de Claude (20/10/2026): las 4 de conversación son 2 + 2.
+    assert sorted(pedidos) == [("cancun", "conversacion", 2), ("cancun", "conversacion", 2),
+                               ("cancun", "perenne", 2)]
     assert estado["_vigencias"]["guion-cancun-conversacion-0"] == "conversacion"
 
 
@@ -102,7 +104,7 @@ def test_lotegrande_automatico_crea_la_fabrica(tmp_path, monkeypatch):
     assert "12 conversaciones + 8 perennes" in respuestas[0]
 
     # Con una activa no se crea otra: comparten la voz.
-    asyncio.run(bot.cmd_lotegrande(update, SimpleNamespace(args=["5", "dia"])))
+    asyncio.run(bot.cmd_lotegrande(update, SimpleNamespace(args=["5", "dia", "cercania"])))
     assert len(list(tmp_path.glob("auto-*/estado.json"))) == 1 and "Ya hay una fábrica" in respuestas[-1]
 
     asyncio.run(bot.cmd_pararfabrica(update, SimpleNamespace(args=[])))
@@ -126,3 +128,49 @@ def test_dos_preguntas_directas():
     assert len(sin_temprana) == 1 and "segundo diez" in sin_temprana[0]
     sin_mitad = fabrica.problemas_de_preguntas(planos(p02="¿Y tú?, ¿lo sabías?"))
     assert len(sin_mitad) == 1 and "mitad" in sin_mitad[0]
+
+
+def test_redes_reparte_mayoria_polemica():
+    """/lotegrande N dia redes (20/10/2026): 3 polémica : 2 tema viral, sobre lo hecho."""
+    # Una de cada cinco es comparativa; el resto 3:2 polémica contra viral.
+    assert fabrica.repartir_redes(5) == [("polemica", 2), ("viral", 2), ("comparativa", 1)]
+    assert fabrica.repartir_redes(10) == [("polemica", 5), ("viral", 3), ("comparativa", 2)]
+    assert fabrica.repartir_redes(1) == [("polemica", 1)]
+    assert fabrica.repartir_redes(2, {"polemica": 3, "viral": 0}) == [("viral", 1), ("comparativa", 1)]
+
+
+def test_tanda_redes_llama_a_las_dos_formulas(monkeypatch):
+    pedidos = []
+
+    def falso(formula):
+        async def escribir(avisador, tema, cant, ligera=None):
+            pedidos.append((formula, cant))
+            return [{"slug": f"guion-{formula}-{len(pedidos)}-{i}"} for i in range(cant)], ["s"]
+        return escribir
+
+    monkeypatch.setattr(fabrica, "_guiones_de_polemica", falso("polemica"))
+    monkeypatch.setattr(fabrica, "_guiones_virales", falso("viral"))
+    monkeypatch.setattr(fabrica, "_guiones_comparativa", falso("comparativa"))
+    estado = {"objetivo": 20, "videos": {}, "guiones_pedidos": 0, "formato": "redes", "por_tanda": 5}
+    nuevos, limite = fabrica.escribir_tanda(estado)
+    assert limite is None and len(nuevos) == 5 and estado["guiones_pedidos"] == 5
+    assert pedidos == [("polemica", 2), ("viral", 2), ("comparativa", 1)]
+
+
+def test_lotegrande_solo_con_cantidad_es_redes(tmp_path, monkeypatch):
+    """20/10/2026: Javier mandó "/lotegrande 10" y le salió el lote viejo."""
+    monkeypatch.setattr(fabrica, "RAIZ", tmp_path)
+    monkeypatch.setattr(bot, "_authorized", lambda chat: True)
+    import subprocess
+    monkeypatch.setattr(subprocess, "Popen", lambda args, **k: None)
+    respuestas = []
+
+    async def responder(texto, **_):
+        respuestas.append(texto)
+
+    update = SimpleNamespace(effective_chat=SimpleNamespace(id=1),
+                             message=SimpleNamespace(reply_text=responder))
+    asyncio.run(bot.cmd_lotegrande(update, SimpleNamespace(args=["10"])))
+    e = json.loads(next(tmp_path.glob("redes-*/estado.json")).read_text(encoding="utf-8"))
+    assert (e["formato"], e["objetivo"], e["horas_claude"]) == ("redes", 10, "")
+    assert "5 polémica + 3 tema viral + 2 comparativa" in respuestas[0]

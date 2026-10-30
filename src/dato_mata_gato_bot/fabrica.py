@@ -36,7 +36,7 @@ from pathlib import Path
 
 import requests
 
-from dato_mata_gato_bot import formatos, lote_grande, pipeline
+from dato_mata_gato_bot import expediente, formatos, lote_grande, pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -68,11 +68,36 @@ def leer(lote: str) -> dict:
 
 
 def guardar(lote: str, estado: dict) -> None:
-    """Escritura atómica: un corte a mitad no deja un estado.json roto."""
+    """Escritura atómica: un corte a mitad no deja un estado.json roto.
+
+    Y respeta un /pararfabrica que haya entrado mientras tanto (15/10/2026). El
+    ciclo lee el estado al empezar la vuelta y lo guarda minutos u horas después
+    -- `escribir_tanda` tarda lo que Claude tarde en investigar y escribir. Si en
+    esa ventana el bot marcó el lote como detenido, la copia vieja en memoria lo
+    revivía al guardar, y la tarea de Windows lo retomaba como si nada. Pasó con
+    `viral-20261015-1856`: Javier canceló un lote de 5 y se generó igual.
+    La bandera `detenida` solo la pone el bot, así que si está en disco gana.
+    """
     ruta = ruta_estado(lote)
+    if "detenida" not in estado:
+        try:
+            previo = leer(lote)
+        except (OSError, ValueError):
+            previo = {}
+        if previo.get("detenida"):
+            estado = {**estado, "detenida": previo["detenida"], "terminado": True}
     tmp = ruta.with_suffix(".tmp")
     tmp.write_text(json.dumps(estado, ensure_ascii=False, indent=2), encoding="utf-8")
     os.replace(tmp, ruta)
+
+
+def detenida(lote: str) -> bool:
+    """¿Entró un /pararfabrica? Se relee del disco: el ciclo puede llevar horas
+    con su copia en memoria (ver `guardar`)."""
+    try:
+        return bool(leer(lote).get("detenida"))
+    except (OSError, ValueError):
+        return False
 
 
 def crear(lote: str, objetivo: int, formato: str = "cercania", **opciones) -> dict:
@@ -376,7 +401,57 @@ def problemas_cercania(slug: str, vigencia: str | None = None) -> list[str]:
     if faltan:
         out.append("no explica cómo cumple estas piezas de la fórmula en _schema.condiciones: "
                    + ", ".join(faltan) + ". Si le falta una, cambia el tema por otro que las tenga todas")
-    return out + problemas_de_vigencia(guion, vigencia) + problemas_de_preguntas(guion)
+    return (out + problemas_de_vigencia(guion, vigencia) + problemas_de_preguntas(guion)
+            + problemas_de_publicacion(guion) + problemas_de_registro(guion))
+
+
+# Español de España y giros de traducción (20/10/2026: Javier oía los guiones
+# "en español neutro o de España"). Solo lo que en México casi nunca se dice:
+# "vale" cuenta como muletilla ("vale," / "¡vale!"), no en "vale la pena".
+_DE_ESPANA = re.compile(
+    r"\b(vosotr[oa]s|vuestr[oa]s?|ordenador(es)?|m[oó]vil(es)?|guay|mola|chaval(es)?|zumos?|"
+    r"aparcar|aparcamiento|coger|cog[ií]|gilipollas|flipar|los llegados|las llegadas)\b"
+    # "veintiséis" y "dieciséis" no son vosotros: el falso positivo forzó una
+    # reescritura completa en 4 de 8 guiones del 27-28/10/2026.
+    r"|¡vale!|\bvale[,.]\s|\b(?!(?:veinti|dieci)s[eé]is\b)\w+(áis|éis)\b", re.IGNORECASE)
+
+
+# Preguntas de opción (21/10/2026): con la voz mexicana, "¿A o B?" y "¿O …?"
+# bajan el tono al final (-5.9 semitonos medido) y no suenan a pregunta; las
+# de sí o no suben (+2.5 a +5.3).
+_PREGUNTA_DE_OPCION = re.compile(r"¿(?:[^?¿]*\s)?o\s[^?¿]*\?", re.IGNORECASE)
+
+
+def problemas_de_registro(guion: dict) -> list[str]:
+    """Que la voz hable como en México, no como en España ni como un doblaje,
+    y que sus preguntas suenen a pregunta."""
+    out = []
+    for p in guion.get("planos", []):
+        texto = p.get("narracion", "")
+        dichas = sorted({m.group(0).strip(" ,.").lower() for m in _DE_ESPANA.finditer(texto)})
+        if dichas:
+            out.append(f"{p.get('id')}: la voz dice {', '.join(repr(d) for d in dichas)}, que suena a "
+                       "España o a traducción; dilo como se dice en México")
+        for m in _PREGUNTA_DE_OPCION.finditer(texto):
+            out.append(f'{p.get("id")}: "{m.group(0)}" es pregunta de opción y la voz la lee sin '
+                       'tono de pregunta; pártela en dos de sí o no ("¿Fue X? ¿Tú crees que fue Y?")')
+    return out
+
+
+GENERICOS = {"#fyp", "#foryou", "#parati", "#viral", "#foryoupage", "#tiktok"}
+
+
+def problemas_de_publicacion(guion: dict) -> list[str]:
+    """Descripción y hashtags para el buscador de TikTok (20/10/2026)."""
+    out = []
+    if len(str(guion.get("descripcion", "")).split()) < 12:
+        out.append('falta "descripcion": 2 o 3 frases con lo que la gente buscaría y la pregunta del p08')
+    etiquetas = [str(h).strip().lower() for h in guion.get("hashtags", []) if str(h).strip()]
+    utiles = [h for h in etiquetas if h.lstrip("#") not in {g.lstrip("#") for g in GENERICOS}]
+    if len(utiles) < 4:
+        out.append(f"lleva {len(utiles)} hashtags útiles y van de 4 a 5 (lugar, tema, institución, "
+                   "nicho y #DatoMataGato; sin #fyp ni #viral)")
+    return out
 
 
 def sesion_ligera() -> bool:
@@ -385,49 +460,256 @@ def sesion_ligera() -> bool:
     return (os.getenv("FABRICA_SESION_LIGERA") or "1").strip() != "0"
 
 
-async def _guiones_de_cercania(avisador, clave: str, cantidad: int, ligera: bool | None = None,
-                               vigencia: str | None = None) -> tuple[list[dict], list[str]]:
-    """Un tema de la fórmula de cercanía: escribe, revisa, una ronda de
-    corrección (en la misma conversación: ya tiene el tema investigado) y deja
-    fuera lo que siga fallando. Devuelve (guiones buenos, sesiones usadas)."""
-    from dato_mata_gato_bot import bot, instruccion_cercania
+# Vueltas extra en la MISMA sesión (20/10/2026): corregir lo que no pasa,
+# completar lo que falta o seguir tras un corte de conexión. La sesión ya tiene
+# el tema investigado; empezar otra cuesta toda la investigación de nuevo.
+MAX_RONDAS = int(os.getenv("FABRICA_RONDAS") or 2)
+
+
+def _guiones_en_disco(prefijo: str, desde: float) -> list[str]:
+    """Slugs con un guion.json escrito desde `desde`. El 20/10/2026 una sesión
+    escribió un guion que pasaba la revisión, se cortó la API antes de
+    responder, y se tiró: el trabajo estaba en disco y nadie lo miró."""
+    slugs = []
+    for ruta in pipeline.ANDROID_IN.glob(f"{prefijo}*/guion.json"):
+        try:
+            if ruta.stat().st_mtime >= desde:
+                slugs.append(ruta.parent.name)
+        except OSError:
+            continue
+    return sorted(slugs)
+
+
+async def _escribir_y_rescatar(avisador, nombre: str, texto: str, cantidad: int, prefijo: str,
+                               revisar, ligera: bool) -> tuple[list[dict], list[str]]:
+    """Escribe en una sesión y no tira trabajo (20/10/2026):
+    - toma lo que Claude respondió Y lo que dejó en disco (el JSON de la
+      respuesta se puede perder en un corte; el guion.json no);
+    - si la API se corta, retoma la misma sesión en vez de darla por perdida;
+    - si un guion no pasa, o entregó menos de los pedidos (el 20/10 entregó 1
+      de 2 y terminó preguntando "dime cuál y lo escribo", sin nadie que
+      contestara), se lo pide en la misma sesión, hasta MAX_RONDAS veces.
+    Si se acaba la cuota, LimiteDeClaude lleva en `.slugs` lo que sí pasó.
+    Devuelve (guiones buenos, sesiones usadas)."""
+    from dato_mata_gato_bot import bot
     from dato_mata_gato_bot.claude_runner import es_limite_de_uso, run_turn
 
-    ligera = sesion_ligera() if ligera is None else ligera
     session_id, _ = bot._sesion_nueva()
-    texto = instruccion_cercania.instruccion(clave, cantidad, bot._ya_cubiertos("guion"), ligera=ligera,
-                                             vigencia=vigencia)
+    desde = time.time() - 5
     r = await asyncio.to_thread(run_turn, session_id, texto, True, ligera)
-    if not r.ok:
-        if es_limite_de_uso(r.text):
-            raise bot.LimiteDeClaude(r.text)
-        await avisador.message.reply_text(f"Falló el tema {clave}: {r.text[:800]}")
-        return [], [session_id]
-    guiones = bot._parse_lote_response(r.text) or []
-    fallas = {g["slug"]: p for g in guiones if g.get("slug") if (p := problemas_cercania(g["slug"], vigencia))}
+    slugs: list[str] = []
+    buenos: list[str] = []
+    fallas: dict[str, list[str]] = {}
+    for ronda in range(MAX_RONDAS + 1):
+        respondidos = [g["slug"] for g in (bot._parse_lote_response(r.text) or []) if g.get("slug")] if r.ok else []
+        for s in respondidos + _guiones_en_disco(prefijo, desde):
+            if s not in slugs:
+                slugs.append(s)
+        revision = {s: revisar(s) for s in slugs}
+        buenos = [s for s, p in revision.items() if not p]
+        fallas = {s: p for s, p in revision.items() if p}
+        if not r.ok and es_limite_de_uso(r.text):
+            exc = bot.LimiteDeClaude(r.text)
+            exc.slugs = buenos
+            raise exc
+        sin_tema = cantidad - len(buenos) - len(fallas)
+        if (r.ok and not fallas and sin_tema <= 0) or ronda == MAX_RONDAS:
+            break
+        partes = []
+        if not r.ok:
+            logger.warning("%s: la sesión %s se cortó (%s); la retomo", nombre, session_id, r.text[:200])
+            partes.append("Se cortó la conexión a media respuesta. Sigue donde ibas: lo que ya "
+                          "escribiste en disco está a salvo y ya lo revisé.")
+        if fallas:
+            partes.append("Estos guiones no pasan la revisión. Corrígelos en su guion.json (mismo "
+                          "slug); si el tema no tiene arreglo, cámbialo por otro, con otro slug:\n"
+                          + "\n".join(f"- {s}: " + "; ".join(p) for s, p in fallas.items()))
+        if sin_tema > 0:
+            partes.append(f"Faltan {sin_tema} guion(es) de los {cantidad} pedidos. Si ya tienes un "
+                          "tema de reemplazo investigado, escríbelo; si no, busca otro que cumpla. "
+                          "No preguntes ni ofrezcas opciones: nadie va a contestar. Decide tú.")
+        partes.append("Responde con el bloque JSON de TODOS los guiones.")
+        r = await asyncio.to_thread(run_turn, session_id, "\n\n".join(partes), False, ligera)
     if fallas:
-        pedido = ("Revisé los guiones y estos no cumplen la fórmula. Corrígelos en su guion.json "
-                  "(mismo slug); si un tema no cumple las cuatro condiciones o no tiene evidencia, "
-                  "reemplázalo por otro, con otro slug. Responde con el mismo bloque JSON, con TODOS "
-                  "los guiones.\n\n" + "\n".join(f"- {s}: " + "; ".join(p) for s, p in fallas.items()))
-        r2 = await asyncio.to_thread(run_turn, session_id, pedido, False, ligera)
-        if r2.ok:
-            guiones = bot._parse_lote_response(r2.text) or guiones
-        elif es_limite_de_uso(r2.text):
-            raise bot.LimiteDeClaude(r2.text)
-    buenos, fuera = [], {}
-    for g in guiones:
-        p = problemas_cercania(g.get("slug", ""), vigencia)
-        if p:
-            fuera[g.get("slug", "?")] = p
-        else:
-            g["vigencia"] = vigencia or ""
-            buenos.append(g)
-    if fuera:
         await avisador.message.reply_text(
-            f"⚠️ Tema {clave}: {len(fuera)} guion(es) quedan fuera porque no cumplen la fórmula:\n"
-            + "\n".join(f"- {s}: " + "; ".join(p) for s, p in fuera.items()))
-    return buenos, [session_id]
+            f"⚠️ {nombre}: {len(fallas)} guion(es) quedan fuera porque no cumplen la fórmula:\n"
+            + "\n".join(f"- {s}: " + "; ".join(p) for s, p in fallas.items()))
+    if not r.ok and not buenos:
+        await avisador.message.reply_text(f"Falló {nombre}: {r.text[:800]}")
+    return [{"slug": s} for s in buenos], [session_id]
+
+
+async def _guiones_de_cercania(avisador, clave: str, cantidad: int, ligera: bool | None = None,
+                               vigencia: str | None = None) -> tuple[list[dict], list[str]]:
+    """Un tema de la fórmula de cercanía (ver `_escribir_y_rescatar`)."""
+    from dato_mata_gato_bot import bot, instruccion_cercania
+
+    ligera = sesion_ligera() if ligera is None else ligera
+    ya = bot._ya_cubiertos("guion")
+    texto = instruccion_cercania.instruccion(clave, cantidad, ya, ligera=ligera, vigencia=vigencia)
+    texto = await asyncio.to_thread(expediente.agregar, texto, clave, None, cantidad, ya,
+                                    2 if vigencia != "perenne" else instruccion_cercania.DIAS_NOTICIA,
+                                    telegram)
+    buenos, sesiones = await _escribir_y_rescatar(
+        avisador, f"el tema {clave}", texto, cantidad, f"guion-{clave}-",
+        lambda s: problemas_cercania(s, vigencia), ligera)
+    for g in buenos:
+        g["vigencia"] = vigencia or ""
+    return buenos, sesiones
+
+
+def problemas_viral(slug: str) -> list[str]:
+    """Revisión sin Claude de un guion de tema viral: todo lo de cercanía más lo
+    propio de los tres niveles (candado, pieza 8, documento, sin_nota_animada)."""
+    from dato_mata_gato_bot import instruccion_viral
+
+    out = problemas_cercania(slug, vigencia="conversacion")
+    if out == ["no se pudo leer el guion.json"]:
+        return out
+    try:
+        guion = json.loads((pipeline.ANDROID_IN / slug / "guion.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ["no se pudo leer el guion.json"]
+    return out + instruccion_viral.problemas(guion)
+
+
+async def _guiones_virales(avisador, tema: str | None, cantidad: int,
+                           ligera: bool | None = None) -> tuple[list[dict], list[str]]:
+    """Un lote de temas virales. Sin `tema`, Claude busca primero de qué se está
+    hablando (ver `_escribir_y_rescatar`)."""
+    from dato_mata_gato_bot import bot, instruccion_viral
+
+    ligera = sesion_ligera() if ligera is None else ligera
+    ya = bot._ya_cubiertos("guion")
+    texto = instruccion_viral.instruccion(cantidad, tema, ya, ligera=ligera)
+    texto = await asyncio.to_thread(expediente.agregar, texto, "viral", tema, cantidad, ya, 2, telegram)
+    buenos, sesiones = await _escribir_y_rescatar(
+        avisador, "el tema viral", texto, cantidad, "guion-viral-", problemas_viral, ligera)
+    for g in buenos:
+        g["vigencia"] = "conversacion"
+    return buenos, sesiones
+
+
+def problemas_polemica(slug: str) -> list[str]:
+    """Revisión sin Claude de un guion de polémica: todo lo de cercanía más lo
+    propio de esta fórmula (la frase citada, la reacción medida, la prueba del
+    ofensor, el veredicto del público)."""
+    from dato_mata_gato_bot import instruccion_polemica
+
+    out = problemas_cercania(slug, vigencia="conversacion")
+    if out == ["no se pudo leer el guion.json"]:
+        return out
+    try:
+        guion = json.loads((pipeline.ANDROID_IN / slug / "guion.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ["no se pudo leer el guion.json"]
+    return out + instruccion_polemica.problemas(guion)
+
+
+async def _guiones_de_polemica(avisador, tema: str | None, cantidad: int,
+                               ligera: bool | None = None) -> tuple[list[dict], list[str]]:
+    """Un lote de polémicas (17/10/2026; ver `_escribir_y_rescatar`)."""
+    from dato_mata_gato_bot import bot, instruccion_polemica
+
+    ligera = sesion_ligera() if ligera is None else ligera
+    ya = bot._ya_cubiertos("guion")
+    texto = instruccion_polemica.instruccion(cantidad, tema, ya, ligera=ligera)
+    texto = await asyncio.to_thread(expediente.agregar, texto, "polemica", tema, cantidad, ya, 2, telegram)
+    buenos, sesiones = await _escribir_y_rescatar(
+        avisador, "la polémica", texto, cantidad, "guion-polemica-", problemas_polemica, ligera)
+    for g in buenos:
+        g["vigencia"] = "conversacion"
+    return buenos, sesiones
+
+
+def problemas_comparativa(slug: str) -> list[str]:
+    """Revisión sin Claude de una comparativa (20/10/2026): lo de cercanía (tema
+    perenne: la comparación es de años) más la misma vara, el veredicto, el
+    balance de cada lado y la prueba del espejo."""
+    from dato_mata_gato_bot import instruccion_comparativa
+
+    out = problemas_cercania(slug, vigencia="perenne")
+    if out == ["no se pudo leer el guion.json"]:
+        return out
+    try:
+        guion = json.loads((pipeline.ANDROID_IN / slug / "guion.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ["no se pudo leer el guion.json"]
+    return out + instruccion_comparativa.problemas(guion)
+
+
+async def _guiones_comparativa(avisador, tema: str | None, cantidad: int,
+                               ligera: bool | None = None) -> tuple[list[dict], list[str]]:
+    """Un lote de comparativas: ahora contra antes, o aquí contra allá (20/10/2026)."""
+    from dato_mata_gato_bot import bot, instruccion_cercania, instruccion_comparativa
+
+    ligera = sesion_ligera() if ligera is None else ligera
+    ya = bot._ya_cubiertos("guion")
+    texto = instruccion_comparativa.instruccion(cantidad, tema, ya, ligera=ligera)
+    # 29/10/2026: antes Claude buscaba sola el tema y las dos cifras oficiales.
+    texto = await asyncio.to_thread(expediente.agregar, texto, "comparativa", tema, cantidad, ya,
+                                    instruccion_cercania.DIAS_NOTICIA, telegram)
+    buenos, sesiones = await _escribir_y_rescatar(
+        avisador, "la comparativa", texto, cantidad, "guion-comparativa-", problemas_comparativa, ligera)
+    for g in buenos:
+        g["vigencia"] = "perenne"
+    return buenos, sesiones
+
+
+# Cómo se escribe y con qué vigencia queda cada fórmula de redes.
+FORMULAS_REDES = {"polemica": ("_guiones_de_polemica", "conversacion"),
+                  "viral": ("_guiones_virales", "conversacion"),
+                  "comparativa": ("_guiones_comparativa", "perenne")}
+
+
+def en_sesiones(cantidad: int) -> list[int]:
+    """Reparte `cantidad` guiones en sesiones de Claude de a lo más
+    FABRICA_GUIONES_POR_SESION (default 2). Medido el 20/10/2026: con 5 por
+    sesión el contexto crecía de 23k a 350k y cada paso lo releía; con uno por
+    sesión se releía 61 % menos. Dos conserva la investigación compartida del
+    tema. Cada sesión ve en la lista de "ya hechos" lo que escribió la anterior."""
+    try:
+        tope = max(1, int(os.getenv("FABRICA_GUIONES_POR_SESION") or 2))
+    except ValueError:
+        tope = 2
+    partes = []
+    while cantidad > 0:
+        partes.append(min(tope, cantidad))
+        cantidad -= partes[-1]
+    return partes
+
+
+# /lotegrande (20/10/2026, teoría de Javier): la mayoría polémica y el resto
+# tema viral, porque el viral trae gente nueva (el de Vicky Wolff); y UNA de
+# cada cinco es comparativa (ahora contra antes). 12:8:5 = 20 % comparativa, y
+# el 80 % restante sigue 3:2 polémica contra viral.
+MEZCLA_REDES = {"polemica": 12, "viral": 8, "comparativa": 5}
+
+
+def repartir_redes(n: int, hechos: dict[str, int] | None = None) -> list[tuple[str, int]]:
+    """n guiones repartidos según MEZCLA_REDES sobre lo que ya hay (como
+    `repartir_vigencias`): cada uno va a la fórmula que más se atrasó."""
+    hechos = hechos or {}
+    pedidos = {f: 0 for f in MEZCLA_REDES}
+    peso = sum(MEZCLA_REDES.values())
+    for _ in range(n):
+        total = sum(hechos.get(f, 0) for f in MEZCLA_REDES) + sum(pedidos.values()) + 1
+        f = max(MEZCLA_REDES, key=lambda x: MEZCLA_REDES[x] * total / peso - hechos.get(x, 0) - pedidos[x])
+        pedidos[f] += 1
+    return [(f, k) for f, k in pedidos.items() if k]
+
+
+ESPERA_IA_GRATIS_MIN = int(os.getenv("FABRICA_ESPERA_IA_GRATIS_MIN") or 60)
+
+
+def esperando_ia_gratis(estado: dict, ahora: datetime) -> bool:
+    """Se acabó la cuota gratis y Javier no dijo /iaclaude: no se escriben
+    guiones (los videos siguen) hasta que pase ESPERA_IA_GRATIS_MIN y se
+    vuelva a probar. Con /iaclaude nunca espera."""
+    agotada = estado.get("ia_gratis_agotada")
+    if not agotada or estado.get("sin_ia_gratis") == "claude":
+        return False
+    return ahora < datetime.fromisoformat(agotada) + timedelta(minutes=ESPERA_IA_GRATIS_MIN)
 
 
 def escribir_tanda(estado: dict) -> tuple[list[str], str | None]:
@@ -449,6 +731,71 @@ def escribir_tanda(estado: dict) -> tuple[list[str], str | None]:
     sesiones = estado.setdefault("_sesiones_tanda", [])
     sesiones.clear()
     vigencias = estado.setdefault("_vigencias", {})
+    def cortada(exc, vig: str) -> tuple[list[str], str]:
+        # Lo que ya pasó la revisión antes de que se acabara la cuota entra igual.
+        for s in getattr(exc, "slugs", []):
+            nuevos.append(s)
+            vigencias[s] = vig
+        return nuevos, str(exc)
+
+    # 27/10/2026, Javier: si la IA gratis se queda sin cuota, preguntar antes de
+    # que Claude investigue solo (gasta 2-3 M tokens por guion).
+    expediente.SI_SE_ACABA = "claude" if estado.get("sin_ia_gratis") == "claude" else "preguntar"
+
+    def sin_cuota_gratis(exc) -> tuple[list[str], None]:
+        estado["ia_gratis_agotada"] = datetime.now().isoformat(timespec="minutes")
+        if estado.get("sin_ia_gratis") != "esperar" and not estado.get("ia_gratis_preguntado"):
+            estado["ia_gratis_preguntado"] = True
+            telegram(f"🆓⛔ Fábrica {estado['lote']}: se acabó la cuota de las IA gratis que investigan "
+                     f"los temas ({str(exc)[:120]}).\n"
+                     "¿Sigo con Claude investigando? Gasta ~2-3 M tokens por guion en vez de ~0.5 M.\n"
+                     "/iaclaude = sí, que siga Claude\n"
+                     f"/iaesperar = no, espero a que se renueve (reintento cada {ESPERA_IA_GRATIS_MIN} min).\n"
+                     "Mientras, sigo generando los videos de los guiones que ya hay.")
+        return nuevos, None
+
+    if estado.get("formato") in ("redes", *FORMULAS_REDES):
+        # Tema viral (15/10/2026) y polémica (17/10/2026); el tema puede venir
+        # vacío, y entonces Claude busca primero de qué se está hablando. Se
+        # eligen por la prueba del papel: si existe un documento que cerraría la
+        # discusión, es "viral"; si lo que detonó todo es una opinión, "polemica".
+        # "redes" (20/10/2026): la mayoría polémica y el resto viral, sobre lo
+        # que el lote YA tiene (un guion descartado no cuenta).
+        if estado["formato"] == "redes":
+            hechos = {f: sum(s.startswith(f"guion-{f}-") for s in estado["videos"]) for f in MEZCLA_REDES}
+            plan = repartir_redes(cuantos, hechos)
+        else:
+            plan = [(estado["formato"], cuantos)]
+        # Polémica y viral sin tema solo se escriben con temas que el expediente ya
+        # filtró (últimos 3 días, sin repetir); si no hay, esa fórmula espera
+        # ESPERA_IA_GRATIS_MIN y Claude no sale a buscar (Javier, 29/10/2026).
+        sin_frescos = estado.setdefault("sin_temas_frescos", {})
+        for formato, total in plan:
+            if (cuando := sin_frescos.get(formato)) and \
+                    datetime.now() < datetime.fromisoformat(cuando) + timedelta(minutes=ESPERA_IA_GRATIS_MIN):
+                continue
+            funcion, vig = FORMULAS_REDES[formato]
+            escribir = globals()[funcion]
+            for cant in en_sesiones(total):
+                try:
+                    guiones, usadas = asyncio.run(escribir(_Avisador(), estado.get("tema") or None, cant))
+                except bot.LimiteDeClaude as exc:
+                    return cortada(exc, vig)
+                except expediente.SinCuotaGratis as exc:
+                    return sin_cuota_gratis(exc)
+                except expediente.SinTemasFrescos as exc:
+                    sin_frescos[formato] = datetime.now().isoformat(timespec="minutes")
+                    telegram(f"🗓️ Fábrica {estado['lote']}: {formato} sin temas nuevos ({str(exc)[:300]}). "
+                             f"Claude no busca por su cuenta; reintento en {ESPERA_IA_GRATIS_MIN} min.")
+                    break
+                sin_frescos.pop(formato, None)
+                sesiones += usadas
+                for g in guiones:
+                    if g.get("slug"):
+                        nuevos.append(g["slug"])
+                        vigencias[g["slug"]] = vig
+                estado["guiones_pedidos"] += cant
+        return nuevos, None
     if estado.get("formato", "cercania") == "cercania":
         conteo: dict[str, int] = {}
         for slug in estado["videos"]:
@@ -468,17 +815,20 @@ def escribir_tanda(estado: dict) -> tuple[list[str], str | None]:
         grupos: dict[tuple, int] = {}
         for par in zip(lista_t, lista_v):
             grupos[par] = grupos.get(par, 0) + 1
-        for (clave, vig), cant in grupos.items():
-            try:
-                guiones, usadas = asyncio.run(_guiones_de_cercania(_Avisador(), clave, cant, vigencia=vig))
-            except bot.LimiteDeClaude as exc:
-                return nuevos, str(exc)
-            sesiones += usadas
-            for g in guiones:
-                if g.get("slug"):
-                    nuevos.append(g["slug"])
-                    vigencias[g["slug"]] = vig or ""
-        estado["guiones_pedidos"] += cuantos
+        for (clave, vig), total in grupos.items():
+            for cant in en_sesiones(total):
+                try:
+                    guiones, usadas = asyncio.run(_guiones_de_cercania(_Avisador(), clave, cant, vigencia=vig))
+                except bot.LimiteDeClaude as exc:
+                    return cortada(exc, vig or "")
+                except expediente.SinCuotaGratis as exc:
+                    return sin_cuota_gratis(exc)
+                sesiones += usadas
+                for g in guiones:
+                    if g.get("slug"):
+                        nuevos.append(g["slug"])
+                        vigencias[g["slug"]] = vig or ""
+                estado["guiones_pedidos"] += cant
         return nuevos, None
     for tipo, desc, cant in formatos.repartir_fish3(cuantos):
         session_id, is_new = bot._sesion_nueva()
@@ -551,13 +901,21 @@ def puede_usar_claude(estado: dict, ahora: datetime) -> str | None:
         dentro = ini <= ahora.hour < fin if ini < fin else (ahora.hour >= ini or ahora.hour < fin)
         if not dentro:
             return f"fuera del horario de Claude ({horas} h)"
-    maximo = int(os.getenv("FABRICA_TANDAS_5H") or 1)
     # Una tanda que cortó el límite de Claude no cuenta como la de su ventana
     # (14/10/2026): el 14/10 la de las 09:13 se cortó a las 09:42 con 4 de 6
     # guiones, la cuota volvió a las 10:30 y la fábrica igual esperó a las 14:13
     # con ~1.5 h parada sin nada que generar.
     recientes = [c for c in estado.get("consumo", [])
                  if ahora - datetime.fromisoformat(c["t"]) < timedelta(hours=5) and not c.get("cortada")]
+    if estado.get("guiones_5h"):
+        # De 2 en 2 (20/10/2026): escribe 2, los genera, y escribe los
+        # siguientes. Lo que se limita son los guiones pedidos por ventana, no
+        # las tandas (con 1 tanda de 2 por ventana no avanzaría).
+        pedidos = sum(c.get("pedidos", c.get("guiones", 0)) for c in recientes)
+        if pedidos >= int(estado["guiones_5h"]):
+            return f"ya se pidieron {pedidos} guiones en las últimas 5 h (máximo {estado['guiones_5h']})"
+        return None
+    maximo = int(os.getenv("FABRICA_TANDAS_5H") or 1)
     if len(recientes) >= maximo:
         return f"ya se pidieron {len(recientes)} tanda(s) en las últimas 5 h (máximo {maximo})"
     return None
@@ -600,6 +958,36 @@ def _correr_video(lote: str, slug: str) -> tuple[bool, str]:
     return r["ok"], r["mensaje"]
 
 
+def para_publicar(slug: str) -> str:
+    """El título y los hashtags del guion, listos para copiar al subir el video
+    (Javier, 16/10/2026). Sin esto había que abrir el guion.json a mano para
+    saber con qué nombre y con qué etiquetas publicarlo."""
+    try:
+        guion = json.loads((pipeline.ANDROID_IN / slug / "guion.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    lineas = []
+    if titulo := str(guion.get("titulo", "")).strip():
+        lineas.append(f"📝 {titulo}")
+    etiquetas = [h if str(h).startswith("#") else f"#{h}"
+                 for h in guion.get("hashtags", []) if str(h).strip()]
+    # Descripción con lo que la gente busca (20/10/2026): el buscador de TikTok
+    # lee la descripción; antes solo había título y 3-4 hashtags.
+    if descripcion := str(guion.get("descripcion", "")).strip():
+        lineas.append("✍️ " + descripcion + (" " + " ".join(etiquetas) if etiquetas else ""))
+    elif etiquetas:
+        lineas.append("🏷️ " + " ".join(etiquetas))
+    if lineas:
+        lineas.append(CHECKLIST_PUBLICAR)
+    return "\n".join(lineas)
+
+
+CHECKLIST_PUBLICAR = (
+    "☑️ Sube el mp4 de C:\\Android_in\\lotes (no el de Telegram) · alta calidad ON · público · "
+    "dúos y stitch ON · revisión de derechos ON · etiqueta de IA si TikTok la pide · "
+    "contesta comentarios la primera hora")
+
+
 def video(lote: str, slug: str) -> None:
     """Lo que corre el proceso hijo: el pipeline de siempre + aviso con el video."""
     estado = leer(lote)
@@ -614,8 +1002,10 @@ def video(lote: str, slug: str) -> None:
                         "-movflags", "+faststart", str(liviano)], check=False, creationflags=_SIN_VENTANA)
         vig = estado["videos"].get(slug, {}).get("vigencia", "")
         etiqueta = {"conversacion": "💬 CONVERSACIÓN: publícala primero", "perenne": "🌲 PERENNE"}.get(vig, "")
+        publicar = para_publicar(slug)
         telegram(f"🎬 {slug} ({(time.time() - inicio) / 60:.0f} min)" + (f"\n{etiqueta}" if etiqueta else "")
-                 + f"\n{r.mensaje[-700:]}", liviano if liviano.exists() else None)
+                 + (f"\n\n{publicar}" if publicar else "")
+                 + f"\n\n{r.mensaje[-700:]}", liviano if liviano.exists() else None)
         # La portada (estilo A, la nota) para subirla al publicar; ya va en el primer cuadro.
         proyecto = pipeline.NARRATOR_PROJECTS / slug
         pegada = pipeline.variante_portada(slug)
@@ -662,12 +1052,14 @@ def _ciclo(lote: str) -> str:
                        or datetime.now() >= datetime.fromisoformat(estado["cuota_libre_desde"]))
         freno = puede_usar_claude(estado, datetime.now())
         if (len(fila) < int(estado.get("colchon", COLCHON)) and len(estado["videos"]) < estado["objetivo"]
-                and cuota_libre and not freno):
+                and cuota_libre and not freno and not esperando_ia_gratis(estado, datetime.now())):
             inicio_tanda = datetime.now()
+            antes = estado["guiones_pedidos"]
             nuevos, limite = escribir_tanda(estado)
             gasto = tokens_de_sesiones(estado.pop("_sesiones_tanda", []))
             estado.setdefault("consumo", []).append(
-                {"t": inicio_tanda.isoformat(timespec="minutes"), "guiones": len(nuevos), **gasto,
+                {"t": inicio_tanda.isoformat(timespec="minutes"), "guiones": len(nuevos),
+                 "pedidos": estado["guiones_pedidos"] - antes, **gasto,
                  **({"cortada": True} if limite else {})})
             estado["cuota_libre_desde"] = None
             if limite:
@@ -686,6 +1078,8 @@ def _ciclo(lote: str) -> str:
                 telegram(f"📝 Fábrica {lote}: {len(nuevos)} guiones nuevos "
                          f"({gasto['total'] / 1e6:.0f} M tokens de Claude).\n{resumen(estado)}")
             guardar(lote, estado)
+            if detenida(lote):
+                return "detenida mientras se escribían los guiones"
             fila = pendientes(estado)
 
         if not fila:
@@ -697,6 +1091,8 @@ def _ciclo(lote: str) -> str:
             return freno or "esperando la cuota de Claude para escribir más guiones"
 
         slug = fila[0]
+        if detenida(lote):  # pudo entrar el /pararfabrica mientras se escribía
+            return "detenida"
         ok, mensaje = _correr_video(lote, slug)
         estado = leer(lote)
         v = estado["videos"][slug]
