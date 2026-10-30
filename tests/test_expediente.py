@@ -1,6 +1,6 @@
 """Expediente previo a Claude (27/10/2026): sin red, con RSS y Gemini falsos."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from dato_mata_gato_bot import expediente, ia_gratis
 
@@ -165,10 +165,19 @@ def test_la_bolsa_aguanta_dos_vueltas(monkeypatch, tmp_path):
     """27/10/2026: la segunda escritura llevaba las fechas ya leídas como datetime."""
     from datetime import datetime
     monkeypatch.setattr(expediente, "CARPETA", tmp_path)
-    tema = {"titulo": "uno", "medio": "m", "liga": "", "fecha": datetime(2026, 10, 27), "motivo": "x"}
+    tema = {"titulo": "uno", "medio": "m", "liga": "", "fecha": datetime.now() - timedelta(days=1), "motivo": "x"}
     expediente.a_la_bolsa("viral", [tema])
     expediente.a_la_bolsa("viral", [{**tema, "titulo": "dos"}])
     assert [t["titulo"] for t in expediente.de_la_bolsa("viral")] == ["dos", "uno"]
+
+
+def test_la_bolsa_tira_las_notas_de_mas_de_3_dias(monkeypatch, tmp_path):
+    """29/10/2026: guardado hace 3 días con nota de hace 3 = tema de 6 días."""
+    from datetime import datetime
+    monkeypatch.setattr(expediente, "CARPETA", tmp_path)
+    expediente.a_la_bolsa("viral", [{"titulo": "viejo", "medio": "m", "liga": "", "motivo": "x",
+                                     "fecha": datetime.now() - timedelta(days=expediente.DIAS_REDES + 1)}])
+    assert expediente.de_la_bolsa("viral") == []
 
 
 def test_la_busqueda_inventada_se_cambia_por_el_titular():
