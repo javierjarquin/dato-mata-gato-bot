@@ -574,22 +574,53 @@ HELP_TEXT = """Comandos disponibles — flujo típico: /nuevovideo → mandar gu
   Ejemplo: /generar
   Requiere: haber mandado guion.json antes con /nuevovideo.
 
-/lotegrande [cantidad] [tema]
-  Con tema (cancun, cdmx, terror, historia, marfil): escribe con la fórmula de
-  la contradicción local (te afecta + ahorita + no cuadra + coraje), sin
-  presentador. Ejemplo: /lotegrande 5 cancun
-  AUTOMÁTICO: con "dia" (todo el día) o un horario ("0-9" = Claude solo de 0 a
-  9 h), la fábrica escribe Y genera sola, 3 temas de conversación (de este mes) por
-  cada 2 perennes, y sigue sola si se acaba la cuota. Los videos te llegan aquí
-  y se archivan sin publicar. Ejemplos: /lotegrande 20 dia
-  /lotegrande 15 0-9 cancun · Estado: /fabrica · Detener: /pararfabrica
-  Sin tema: escribe un lote GRANDE y variado (default 30). A diferencia de /lote, reparte
-  entre los seis formatos de crimen + trivia, para que el canal deje de abrir
-  siempre igual: clásico, caso famoso con ángulo desconocido, caso abierto para
-  teorizar, versión oficial contra la evidencia, dato de 15 segundos, y
-  culpable/inocente con votación.
-  Solo escribe los guiones. Generarlos es /generargrande.
-  Ejemplo: /lotegrande        /lotegrande 15
+/lotegrande [cantidad] [dia | 0-9] [tema | cercania | variado]
+  DEFAULT (20/10/2026): la mayoría polémica, el resto tema viral, y una de cada
+  cinco comparativa (ahora contra antes). De 2 en 2: escribe 2, los genera, sigue.
+  Claude busca de qué se está hablando; la fábrica escribe Y genera sola, sigue
+  sola si se acaba la cuota, y cada video te llega aquí (se archiva sin
+  publicar). Ejemplos: /lotegrande 10 · /lotegrande 20 0-9 (Claude de 0 a 9 h)
+  Con tema (cancun, cdmx, terror, historia, marfil) o "cercania": la fórmula de
+  la contradicción local, 3 de conversación por cada 2 perennes. Con "dia" o un
+  horario es automática; con tema y sin horario solo escribe.
+  Ejemplos: /lotegrande 20 dia cercania · /lotegrande 15 0-9 cancun
+  Con "variado": el lote viejo de crimen + trivia (seis formatos). Solo escribe
+  los guiones; generarlos es /generargrande. Ejemplo: /lotegrande 15 variado
+  Estado: /fabrica · Detener: /pararfabrica
+
+/temaviral [cantidad] [tema]
+  Para los temas de los que YA se está hablando en redes (rumores, videos que
+  bajaron, "van a privatizar"). Otra fórmula: TRES NIVELES intercalados -- lo que
+  se dice (atribuido) / lo que está en papel / lo que nadie ha contestado -- y el
+  rumor regresa a la mitad del video. El canal no afirma ni desmiente lo que no
+  tiene documento: enseña el hueco.
+  Cada guion necesita un documento oficial en pantalla y pasar el candado: si el
+  dato propio no vale el video sin el rumor, el tema se descarta solo.
+  Escribe Y genera sola, como la fábrica. Default 5: los temas se enfrían.
+  Ejemplos: /temaviral 5 israel y yucatan
+            /temaviral 5     → Claude busca las tendencias de la semana
+  Estado: /fabrica · Detener: /pararfabrica
+
+/polemica [cantidad] [tema]
+  Para los virales que detonó una OPINIÓN, no una versión de los hechos: un
+  insulto, una burla, un juicio sobre todo un grupo. Ahí no hay papel que cierre
+  la discusión, así que la fórmula es otra: la causa (la frase, citada) / la
+  respuesta de los afectados, medida / la premisa que la opinión da por cierta y
+  la cifra que la desarma. El hueco no es el papel que nadie enseñó: es la
+  respuesta que nadie dio. Y el veredicto lo pide el video, no lo da.
+  La prueba para elegir entre las dos: ¿existe un papel que, si apareciera,
+  cerraría la discusión? Sí → /temaviral. No → /polemica.
+
+/comparativa [cantidad] [tema]
+  ¿Quién lo hace mejor? Una situación (agua, seguridad, transporte, un trámite),
+  cómo se hace ahora, cómo se hacía antes (o en otro estado o país), y cuál
+  funciona mejor y por qué, con lo bueno y lo malo de cada lado. El veredicto
+  sale de UN indicador medido igual en los dos lados. En /lotegrande va una de
+  cada cinco. Ejemplo: /comparativa 2 agua en quintana roo
+  Escribe Y genera sola, como la fábrica. Default 5: los temas se enfrían.
+  Ejemplos: /polemica 3 conalep bandidos del jale
+            /polemica 3      → Claude busca las polémicas de la semana
+  Estado: /fabrica · Detener: /pararfabrica
 
 /generargrande
   Genera el lote grande pendiente y lo ARCHIVA sin publicar: nada va a Drive ni
@@ -750,7 +781,10 @@ BOT_COMMANDS = [
     ("mitos", "Lote de mitos y leyendas [cantidad]"),
     ("completarlote", "Escribir lo que faltó del último lote (si se acabó la cuota)"),
     ("generarlote", "Generar los videos del último lote"),
-    ("lotegrande", "Lote grande [cantidad] [dia | 0-9 = automático] [tema]"),
+    ("lotegrande", "Lote grande: polémica + viral [cantidad] [0-9] · cercania · variado"),
+    ("temaviral", "Tema viral [cantidad] [tema] (sin tema, busca tendencias)"),
+    ("polemica", "Polémica [cantidad] [tema] (cuando lo viral lo detonó una opinión)"),
+    ("comparativa", "Comparativa [cantidad] [tema]: ahora vs antes, ¿quién lo hace mejor?"),
     ("fabrica", "Cómo va la fábrica automática"),
     ("pararfabrica", "Detener la fábrica automática"),
     ("generargrande", "Generar el lote grande y archivarlo sin publicar"),
@@ -853,6 +887,7 @@ _LOTE_DEFAULT = 5
 # Un lote grande son 30 videos variados que se archivan sin publicar; ver
 # lote_grande.py para por qué es un modo aparte y no un lote largo.
 _LOTE_GRANDE_DEFAULT = 30
+_TEMAVIRAL_DEFAULT = 5  # /temaviral (15/10/2026): lotes chicos, los temas se enfrían
 
 
 def _parse_lote_response(texto: str) -> list[dict] | None:
@@ -1038,44 +1073,172 @@ async def cmd_lote(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def cmd_lotegrande(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Escribe un lote grande y variado. Uso: /lotegrande [cantidad] (default 30)
+    """Lote grande. Uso: /lotegrande [cantidad] [dia | 0-9] [tema | cercania | variado]
 
-    Solo ESCRIBE los guiones; generarlos es /generarlote, igual que siempre,
-    para que se puedan revisar antes de gastar once horas de máquina.
+    Desde el 20/10/2026 el default es la fábrica automática de REDES (3 polémica
+    : 2 tema viral): Javier mandó "/lotegrande 10" esperando eso y le salió el
+    lote viejo de crimen + trivia. Ese sigue con "variado" (solo ESCRIBE; generar
+    es /generargrande). Con tema o "cercania", la fórmula de la contradicción local.
     """
     from dato_mata_gato_bot import instruccion_cercania
 
     temas = {clave: nombre for clave, nombre, _ in instruccion_cercania.TEMAS}
-    n, tema, horario = _LOTE_GRANDE_DEFAULT, None, None
+    n, tema, horario, modo = _LOTE_GRANDE_DEFAULT, None, None, "redes"
     for arg in context.args or []:
         if arg.isdigit():
             n = int(arg)
+        elif arg.lower() in ("redes", "cercania", "variado"):
+            modo = arg.lower()
         elif arg.lower() in temas:
             tema = arg.lower()
+            modo = "cercania"
         elif arg.lower() == "dia":
             horario = ""
         elif re.fullmatch(r"\d{1,2}-\d{1,2}", arg) and all(0 <= int(x) <= 24 for x in arg.split("-")):
             horario = arg
         else:
             await update.message.reply_text(
-                "Uso: /lotegrande [cantidad] [tema] (default 30, variado)\n"
-                "     /lotegrande 20 dia [tema]   → automático, todo el día\n"
-                "     /lotegrande 20 0-9 [tema]   → automático, Claude solo de 0 a 9 h\n"
+                "Uso: /lotegrande [cantidad] [0-9]       → polémica + tema viral (3:2), automático\n"
+                "     /lotegrande 20 dia cercania [tema] → contradicción local, automático\n"
+                "     /lotegrande 15 0-9 cancun          → contradicción local, Claude de 0 a 9 h\n"
+                "     /lotegrande 15 variado             → el lote viejo de crimen + trivia (solo escribe)\n"
                 f"Temas con la fórmula de cercanía: {', '.join(temas)}")
             return
-    if horario is not None:
-        await _lotegrande_automatico(update, n, horario, tema)
+    if modo == "redes":
+        await _lotegrande_automatico(update, n, horario or "", None, formato="redes")
         return
-    if tema:
-        # Con tema (13/10/2026): la fórmula de la contradicción local, la misma
-        # de la fábrica, escrita en la sesión ligera. Sin presentador.
-        # 3 de conversación : 2 perennes, igual que la fábrica (14/10/2026).
-        await _pedir_lote(update, context,
-                          lambda k: [(f"{CERCANIA}{tema}:{v}", f"{instruccion_cercania.NOMBRES[v][1]} de {temas[tema]}", c)
-                                     for v, c in instruccion_cercania.repartir_vigencias(k)],
-                          cantidad=n, sin_avatar=True)
+    if modo == "variado":
+        await _pedir_lote(update, context, formatos.repartir, cantidad=n)
         return
-    await _pedir_lote(update, context, formatos.repartir, cantidad=n)
+    if horario is not None or not tema:
+        await _lotegrande_automatico(update, n, horario or "", tema)
+        return
+    # Con tema y sin horario (13/10/2026): la fórmula de la contradicción local,
+    # la misma de la fábrica, escrita en la sesión ligera. Sin presentador.
+    # 3 de conversación : 2 perennes, igual que la fábrica (14/10/2026).
+    await _pedir_lote(update, context,
+                      lambda k: [(f"{CERCANIA}{tema}:{v}", f"{instruccion_cercania.NOMBRES[v][1]} de {temas[tema]}", c)
+                                 for v, c in instruccion_cercania.repartir_vigencias(k)],
+                      cantidad=n, sin_avatar=True)
+
+
+# Las dos fórmulas de tema viral, y lo que el bot contesta al arrancar cada una.
+# Se eligen por la prueba del papel (17/10/2026): ¿existe un papel que, si
+# apareciera, cerraría la discusión? Sí -> "viral" (tres niveles). No, porque lo
+# que detonó todo es una opinión -> "polemica".
+_FORMULAS_VIRALES = {
+    "viral": {
+        "comando": "temaviral", "titulo": "🔥 Tema viral", "ejemplo": "israel y yucatan",
+        "busca": "tendencias de esta semana en redes",
+        "lineas": ["• Fórmula de tres niveles: lo que se dice · lo que está en papel · lo que "
+                   "nadie ha contestado. Intercalados, y el rumor regresa a la mitad.",
+                   "• Cada guion necesita documento oficial en pantalla y pasar el candado: si "
+                   "el dato propio no vale el video sin el rumor, el tema se descarta solo."]},
+    "polemica": {
+        "comando": "polemica", "titulo": "🗣 Polémica", "ejemplo": "conalep bandidos del jale",
+        "busca": "las polémicas de esta semana en redes",
+        "lineas": ["• Fórmula de la polémica: la causa (la frase, citada) · la respuesta de los "
+                   "afectados, medida · la premisa y la cifra que la desarma. El hueco es quién "
+                   "no ha contestado.",
+                   "• Cada guion necesita las dos publicaciones en pantalla (lo que se dijo y "
+                   "quién contestó) y pasar la prueba del ofensor: si el dato le sirve a quien "
+                   "insultó, el tema se descarta solo.",
+                   "• El veredicto lo pide el video y lo da quien lo ve: cierra preguntando, "
+                   "con los dos lados nombrados."]},
+    "comparativa": {
+        "comando": "comparativa", "titulo": "⚖️ Comparativa", "ejemplo": "agua en quintana roo",
+        "busca": "qué hace hoy un gobierno distinto al anterior o a otro estado",
+        "lineas": ["• Fórmula de la comparativa: cómo se hace ahora · cómo se hacía antes (o en "
+                   "otro lado) · cuál funciona mejor y por qué, con lo bueno y lo malo de cada lado.",
+                   "• Cada guion necesita UN indicador medido igual en los dos lados, la fuente en "
+                   "pantalla, y pasar la prueba del espejo (sin lenguaje de campaña)."]},
+}
+_NOMBRE_FORMULA = {"polemica": "polémica", "viral": "tema viral", "comparativa": "comparativa"}
+
+
+async def _arrancar_viral(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                          formato: str) -> None:
+    """El cuerpo que comparten /temaviral y /polemica: lee cantidad y tema, crea
+    la fábrica con la fórmula que toca y arranca el ciclo."""
+    import subprocess
+    import sys
+
+    from dato_mata_gato_bot import fabrica
+
+    if not _authorized(update.effective_chat.id):
+        await _reject_unauthorized(update)
+        return
+    f = _FORMULAS_VIRALES[formato]
+    args = list(context.args or [])
+    n = _TEMAVIRAL_DEFAULT
+    if args and args[0].isdigit():
+        n = int(args.pop(0))
+    # El resto es el tema, tal cual lo escribió Javier ("israel y yucatan").
+    tema = " ".join(args).strip() or None
+    if not 1 <= n <= 50:
+        await update.message.reply_text(
+            f"Uso: /{f['comando']} [cantidad 1-50] [tema]\n"
+            f"Ejemplo: /{f['comando']} 5 {f['ejemplo']}\n"
+            f"Sin tema, Claude busca: /{f['comando']} 5")
+        return
+    if activas := _fabricas_activas():
+        await update.message.reply_text(
+            "Ya hay una fábrica trabajando (comparten la voz, va una a la vez):\n"
+            + "\n".join(fabrica.resumen(e) for e in activas)
+            + "\n\nEspera a que termine o detenla con /pararfabrica.")
+        return
+    lote = f"{formato}-{datetime.now():%Y%m%d-%H%M}"
+    estado = fabrica.crear(lote, n, formato, horas_claude="", tema=tema, **_DE_DOS_EN_DOS)
+    pyw = Path(sys.executable).with_name("pythonw.exe")
+    subprocess.Popen([str(pyw if pyw.exists() else sys.executable), str(_FABRICA_CLI), "ciclo", lote],
+                     cwd=str(_FABRICA_CLI.parents[1]),
+                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "DETACHED_PROCESS", 0))
+    de_donde = tema if tema else "lo busca Claude (" + f["busca"] + ")"
+    await update.message.reply_text(
+        f"{f['titulo']} {lote}: {n} videos.\n"
+        f"• Tema: {de_donde}\n"
+        + "\n".join(f["lineas"]) + "\n"
+        f"• Generar todo toma ~{n * 45 / 60:.0f} h. Cada video te llega aquí y se archiva en "
+        f"{estado['carpeta_videos']} sin publicar.\n"
+        "Estado: /fabrica · Detener: /pararfabrica")
+
+
+async def cmd_temaviral(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Lote con la fórmula del TEMA VIRAL (15/10/2026).
+
+    Uso: /temaviral [cantidad] [tema...]   ·   /temaviral 5 israel y yucatan
+         /temaviral 5                      → Claude busca las tendencias él solo
+
+    Estos videos no salen por /lotegrande: son los tres niveles (lo que se dice /
+    lo que está en papel / lo que nadie ha contestado) y llevan su propia
+    revisión (candado anti-rumor, pieza 8, documento en pantalla). Como la
+    fábrica automática: escribe Y genera sola, y cada video llega aquí.
+    """
+    await _arrancar_viral(update, context, "viral")
+
+
+async def cmd_polemica(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Lote con la fórmula de LA POLÉMICA (17/10/2026).
+
+    Uso: /polemica [cantidad] [tema...]   ·   /polemica 3 conalep bandidos del jale
+         /polemica 3                      → Claude busca las polémicas él solo
+
+    Para los virales que detonó una OPINIÓN: ahí no hay papel que cierre la
+    discusión, así que el nivel 2 no es un documento sino la respuesta de los
+    afectados, medida, y el cierre le pide el veredicto a quien ve. La fórmula
+    hermana de /temaviral; se eligen por la prueba del papel.
+    """
+    await _arrancar_viral(update, context, "polemica")
+
+
+async def cmd_comparativa(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Lote con la fórmula de LA COMPARATIVA (20/10/2026): cómo se hace ahora,
+    cómo se hacía antes (o en otro lado), cuál funciona mejor y por qué.
+
+    Uso: /comparativa [cantidad] [tema...]   ·   /comparativa 2 agua en quintana roo
+    En /lotegrande va sola: una de cada cinco.
+    """
+    await _arrancar_viral(update, context, "comparativa")
 
 
 # Tramo "cercania:<tema>" de /lotegrande (fórmula de la contradicción local).
@@ -1085,6 +1248,10 @@ CERCANIA = "cercania:"
 # Por ventana de 5 h se escriben los que alcanzan a generarse (un video tarda
 # 40-45 min, casi todo la voz), así no se acumulan temas que se enfrían.
 _VIDEOS_POR_VENTANA = int(os.getenv("FABRICA_VIDEOS_5H") or 6)
+# De 2 en 2 (20/10/2026, Javier): escribe 2 guiones, genera esos 2 videos y
+# solo entonces escribe los siguientes (colchon=1: escribe cuando ya no queda
+# nada por generar). Antes pedía 6 de golpe y nada se generaba hasta tenerlos.
+_DE_DOS_EN_DOS = {"por_tanda": 2, "colchon": 1, "guiones_5h": _VIDEOS_POR_VENTANA}
 _FABRICA_CLI = Path(__file__).resolve().parents[2] / "tools" / "fabrica.py"
 
 
@@ -1104,7 +1271,8 @@ def _fabricas_activas() -> list[dict]:
     return activas
 
 
-async def _lotegrande_automatico(update: Update, n: int, horario: str, tema: str | None) -> None:
+async def _lotegrande_automatico(update: Update, n: int, horario: str, tema: str | None,
+                                 formato: str = "cercania") -> None:
     """/lotegrande 20 dia [tema] o /lotegrande 20 0-9 [tema]: crea una fábrica
     que escribe Y genera sola (3 temas de conversación : 2 perennes),
     se reanuda tras el límite de Claude y archiva sin publicar."""
@@ -1123,14 +1291,28 @@ async def _lotegrande_automatico(update: Update, n: int, horario: str, tema: str
             + "\n".join(fabrica.resumen(e) for e in activas)
             + "\n\nEspera a que termine o detenla con /pararfabrica.")
         return
-    lote = f"auto-{datetime.now():%Y%m%d-%H%M}"
-    estado = fabrica.crear(lote, n, "cercania", horas_claude=horario, tema=tema,
-                           por_tanda=_VIDEOS_POR_VENTANA, colchon=2, vigencias=True)
+    lote = f"{'redes' if formato == 'redes' else 'auto'}-{datetime.now():%Y%m%d-%H%M}"
+    estado = fabrica.crear(lote, n, formato, horas_claude=horario, tema=tema,
+                           vigencias=formato == "cercania", **_DE_DOS_EN_DOS)
     # La tarea de Windows la retoma cada 15 min; el primer ciclo arranca ya.
     pyw = Path(sys.executable).with_name("pythonw.exe")
     subprocess.Popen([str(pyw if pyw.exists() else sys.executable), str(_FABRICA_CLI), "ciclo", lote],
                      cwd=str(_FABRICA_CLI.parents[1]),
                      creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "DETACHED_PROCESS", 0))
+    if formato == "redes":
+        mezcla = fabrica.repartir_redes(n)
+        await update.message.reply_text(
+            f"🗣🔥 Fábrica {lote} en marcha: {n} videos de redes.\n"
+            "• Mezcla: " + " + ".join(f"{k} {_NOMBRE_FORMULA[f]}" for f, k in mezcla)
+            + " (las IA gratis buscan de qué se está hablando y arman el expediente; Claude solo "
+              "escribe. Cada fórmula con su propia revisión)\n"
+            "• De 2 en 2: escribe 2 guiones, genera esos 2 videos y sigue con los siguientes. "
+            f"Claude escribe {'todo el día' if not horario else f'solo de {horario} h'}, hasta "
+            f"{_VIDEOS_POR_VENTANA} guiones por ventana de 5 h.\n"
+            f"• Generar todo toma ~{n * 45 / 60:.0f} h. Cada video te llega aquí al terminar; se "
+            f"archiva en {estado['carpeta_videos']} sin publicar.\n"
+            "Estado: /fabrica · Detener: /pararfabrica")
+        return
     temas = {c: nombre for c, nombre, _ in instruccion_cercania.TEMAS}
     mezcla = instruccion_cercania.repartir_vigencias(n)
     horas = n * 45 / 60
@@ -1139,8 +1321,9 @@ async def _lotegrande_automatico(update: Update, n: int, horario: str, tema: str
         f"• Tema: {temas[tema] if tema else 'repartido entre ' + ', '.join(temas)}\n"
         "• Mezcla: " + " + ".join(f"{k} {instruccion_cercania.NOMBRES[v][1 if k > 1 else 0]}" for v, k in mezcla)
         + " (temas de este mes que hacen hablar; todos con dos preguntas directas a quien ve)\n"
-        f"• Claude escribe {'todo el día' if not horario else f'solo de {horario} h'}, hasta "
-        f"{_VIDEOS_POR_VENTANA} guiones por ventana de 5 h (lo que alcanza a generarse).\n"
+        "• De 2 en 2: escribe 2 guiones, genera esos 2 videos y sigue con los siguientes. "
+        f"Claude escribe {'todo el día' if not horario else f'solo de {horario} h'}, hasta "
+        f"{_VIDEOS_POR_VENTANA} guiones por ventana de 5 h.\n"
         f"• Si se acaba la cuota, sigue generando lo escrito y retoma sola.\n"
         f"• Generar todo toma ~{horas:.0f} h. Cada video te llega aquí al terminar; se archiva en "
         f"{estado['carpeta_videos']} sin publicar.\n"
@@ -1168,6 +1351,41 @@ async def cmd_fabrica(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             linea += f"\n  ⏸️ esperando la cuota de Claude hasta {e['cuota_libre_desde'].replace('T', ' ')}"
         lineas.append(linea)
     await update.message.reply_text("\n\n".join(lineas))
+
+
+async def _decidir_ia_gratis(update: Update, decision: str, texto: str) -> None:
+    """/iaclaude y /iaesperar (27/10/2026): qué hace la fábrica cuando las IA
+    gratis del expediente se quedan sin cuota."""
+    from dato_mata_gato_bot import fabrica
+
+    if not _authorized(update.effective_chat.id):
+        await _reject_unauthorized(update)
+        return
+    activas = _fabricas_activas()
+    if not activas:
+        await update.message.reply_text("No hay ninguna fábrica trabajando.")
+        return
+    for e in activas:
+        estado = fabrica.leer(e["lote"])
+        estado["sin_ia_gratis"] = decision
+        if decision == "claude":
+            estado["ia_gratis_agotada"] = None
+        fabrica.guardar(e["lote"], estado)
+    await update.message.reply_text(texto)
+
+
+async def cmd_iaclaude(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Sin cuota gratis, que Claude investigue los temas (gasta más)."""
+    await _decidir_ia_gratis(update, "claude", "✅ Va: cuando no haya IA gratis, Claude investiga solo. "
+                                               "En el próximo ciclo sigue escribiendo.")
+
+
+async def cmd_iaesperar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Sin cuota gratis, esperar a que se renueve (no gasta Claude en investigar)."""
+    from dato_mata_gato_bot import fabrica
+
+    await _decidir_ia_gratis(update, "esperar", f"⏳ Va: espero la cuota gratis y reintento cada "
+                                                f"{fabrica.ESPERA_IA_GRATIS_MIN} min, sin volver a preguntar.")
 
 
 async def cmd_pararfabrica(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2545,8 +2763,13 @@ def main() -> None:
     app.add_handler(CommandHandler("nuevolote", cmd_crimen))
     app.add_handler(CommandHandler("generarlote", cmd_generarlote))
     app.add_handler(CommandHandler("lotegrande", cmd_lotegrande))
+    app.add_handler(CommandHandler("temaviral", cmd_temaviral))
+    app.add_handler(CommandHandler("polemica", cmd_polemica))
+    app.add_handler(CommandHandler("comparativa", cmd_comparativa))
     app.add_handler(CommandHandler("fabrica", cmd_fabrica))
     app.add_handler(CommandHandler("pararfabrica", cmd_pararfabrica))
+    app.add_handler(CommandHandler("iaclaude", cmd_iaclaude))
+    app.add_handler(CommandHandler("iaesperar", cmd_iaesperar))
     app.add_handler(CommandHandler("generargrande", cmd_generargrande))
     app.add_handler(CommandHandler("pausa", cmd_pausa))
     app.add_handler(CommandHandler("reanudar", cmd_reanudar))

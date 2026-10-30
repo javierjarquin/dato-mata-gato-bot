@@ -95,5 +95,5 @@ def test_lotefish3_marca_el_lote_sin_presentador_y_solo_pide_crimen():
 def test_un_lotegrande_despues_vuelve_a_tener_presentador():
     """Si la marca quedara puesta, el siguiente lote grande saldría sin presentadores."""
     with patch.object(bot.formatos, "repartir", lambda n: [("crimen", "de true crime", n)]):
-        espia = _correr(bot.cmd_lotegrande, "/lotegrande", ["3"])
+        espia = _correr(bot.cmd_lotegrande, "/lotegrande", ["3", "variado"])
     assert espia["sin_avatar"] is False

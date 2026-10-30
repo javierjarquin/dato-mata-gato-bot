@@ -29,9 +29,13 @@ import re
 from dataclasses import dataclass, field
 from itertools import cycle, islice
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
+import urllib3
 from PIL import Image, ImageDraw, ImageFont
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +50,12 @@ TOMAS_POR_PLANO = 5  # de sobra: el narrador pide entre 1 y 4 según el largo
 FONDO, AMARILLO, BLANCO, GRIS = (14, 14, 16), (235, 200, 60), (240, 240, 240), (150, 150, 150)
 # Piezas con texto: el plano va con movimiento "calm" (zoom máx. 1.18 en vez
 # de 1.30), si no el acercamiento se come letras del borde.
-CON_TEXTO = {"documento", "prensa", "ficha"}
-REALES = {"lugar", "persona", "documento", "prensa"}
+CON_TEXTO = {"documento", "prensa", "ficha", "red_social"}
+# `video_red` y `red_social` (15/10/2026, fórmula de tema viral): la publicación
+# de redes es evidencia real del fenómeno -- que el video existe, de quién es y
+# qué tan grande fue. Va con crédito, como cita de actualidad.
+REALES = {"lugar", "persona", "documento", "prensa", "red_social", "video_red"}
+DE_REDES = {"red_social", "video_red"}
 
 
 @dataclass
@@ -186,12 +194,35 @@ def bajar_wikimedia(pieza: dict, destino: Path) -> dict:
             "autor": re.sub(r"<[^>]+>", "", meta.get("Artist", {}).get("value", "?"))[:120]}
 
 
+def _bajar_pdf(url: str) -> bytes:
+    """El PDF, aguantando los certificados rotos de los sitios oficiales.
+
+    sil.gobernacion.gob.mx -- el sistema de información legislativa, donde viven
+    los puntos de acuerdo -- sirve la cadena incompleta y `requests` lo rechaza
+    con CERTIFICATE_VERIFY_FAILED (15/10/2026). Es la fuente primaria de los
+    temas virales, así que sin esto el nivel 3 se queda sin documento. El
+    reintento sin verificar va SOLO para dominios de gobierno: ahí el riesgo de
+    suplantación es bajo y el contenido es público y verificable aparte.
+    """
+    try:
+        r = requests.get(url, headers=UA, timeout=120)
+        r.raise_for_status()
+        return r.content
+    except requests.exceptions.SSLError:
+        host = urlparse(url).netloc.lower()
+        if not (host.endswith(".gob.mx") or host.endswith(".gov")):
+            raise
+        logger.warning("%s tiene el certificado roto; se baja sin verificar", host)
+        r = requests.get(url, headers=UA, timeout=120, verify=False)
+        r.raise_for_status()
+        return r.content
+
+
 def pagina_pdf(pieza: dict, destino: Path) -> dict:
     import pymupdf
 
-    r = requests.get(pieza["url"], headers=UA, timeout=120)
-    r.raise_for_status()
-    doc = pymupdf.open(stream=r.content, filetype="pdf")
+    contenido = _bajar_pdf(pieza["url"])
+    doc = pymupdf.open(stream=contenido, filetype="pdf")
     num = max(1, int(pieza.get("pagina", 1)))
     if num > len(doc):
         raise ValueError(f"el PDF tiene {len(doc)} páginas, no {num}")
@@ -348,6 +379,35 @@ def _es_pdf(url: str) -> bool:
     return url.lower().split("?")[0].endswith(".pdf")
 
 
+def _huella(pieza: dict) -> str:
+    """De dónde sale la pieza, en una línea. Si esto cambia, hay que recapturar."""
+    p = pieza
+    partes = [str(p.get("tipo", "")), str(p.get("url", "")), str(p.get("wikimedia", "")),
+              str(p.get("buscar_wikimedia", "")), str(p.get("titulo", "")),
+              "|".join(str(r) for r in p.get("renglones", [])), str(p.get("fuente", "")),
+              str(p.get("pagina", "")), str(p.get("desde", "")), str(p.get("fraccion", "")),
+              str(p.get("desde_seg", "")), str(p.get("segundos", ""))]
+    return "~".join(partes)
+
+
+def _cambio(pieza: dict, guardada: dict) -> bool:
+    """Si la pieza del guion ya no es la que se capturó.
+
+    El caché iba por `id` a secas, así que cambiarle la URL a una pieza ya
+    armada no servía de nada: se quedaba la captura vieja. Así fue como el
+    video de MINISO salió enseñando la nota de la EDIS 2017 ("Publicado el 31
+    Agosto 2017") rotulada "COPRED, EDIS 2026" -- se corrigió el guion y el
+    render siguió usando el JPG de antes (16/10/2026).
+    """
+    if (huella := guardada.get("huella")) is not None:
+        return huella != _huella(pieza)
+    # Manifest viejo, sin huella: al menos se compara la URL, que es el caso
+    # que rompe. Las fichas y las fotos se dan por buenas para no rehacer
+    # cientos de piezas ya armadas.
+    url = pieza.get("url")
+    return bool(url) and guardada.get("fuente") not in (None, url)
+
+
 def preparar(slug: str, entrada: Path | None = None) -> Reporte:
     """Construye la evidencia del guion y la deja como imágenes manuales.
 
@@ -368,7 +428,7 @@ def preparar(slug: str, entrada: Path | None = None) -> Reporte:
     claves = claves_del_caso(guion)
 
     necesitan_navegador = [p for p in piezas.values()
-                           if p.get("tipo") in ("documento", "prensa")
+                           if p.get("tipo") in ("documento", "prensa", *DE_REDES)
                            and p.get("url") and not _es_pdf(p["url"])]
     ctx = nav = pw = None
     if necesitan_navegador:
@@ -383,11 +443,17 @@ def preparar(slug: str, entrada: Path | None = None) -> Reporte:
         for pid, p in piezas.items():
             tipo = p.get("tipo", "")
             destino = carpeta / f"{pid}.jpg"
-            if destino.exists() and pid in manifest:
+            if destino.exists() and pid in manifest and not _cambio(p, manifest[pid]):
                 reporte.piezas[pid] = tipo
                 continue
             try:
-                if tipo in ("lugar", "persona"):
+                if tipo in DE_REDES:
+                    from dato_mata_gato_bot import evidencia_redes
+
+                    meta = evidencia_redes.armar(ctx, p, destino)
+                    tipo = meta.get("tipo", tipo)  # un video_red caído queda como red_social
+                    reporte.piezas[pid] = tipo
+                elif tipo in ("lugar", "persona"):
                     meta = bajar_wikimedia(p, destino)
                 elif tipo == "ficha":
                     dibujar_ficha(p.get("titulo", ""), p.get("renglones", []),
@@ -398,7 +464,7 @@ def preparar(slug: str, entrada: Path | None = None) -> Reporte:
                             else capturar_titular(ctx, p, destino, claves))
                 else:
                     raise ValueError(f"tipo desconocido o sin url: {tipo!r}")
-                manifest[pid] = {"tipo": tipo, **meta}
+                manifest[pid] = {"tipo": tipo, **meta, "huella": _huella(p)}
                 reporte.piezas[pid] = tipo
             except Exception as exc:  # noqa: BLE001 -- una pieza caída no tira el resto
                 destino.unlink(missing_ok=True)

@@ -44,6 +44,10 @@ _LUGAR_PREFIJO = re.compile(
 _MIN_NOMBRES = 3
 _MIN_REALES = 3
 _REALES = {"lugar", "persona", "documento", "prensa"}
+# Los de VisualTipo en illustrated-narrator (domain/entities/plano.py). Si allá
+# se agrega uno, aquí también: esta lista solo adelanta el mismo rechazo.
+_VISUAL_TIPOS = {"imagen_ia", "video_stock", "animacion_3d", "mapa_animado",
+                 "grafico_movimiento", "cartel_texto", "archivo_historico"}
 
 
 def _sin_acentos(t: str) -> str:
@@ -115,6 +119,18 @@ def problemas(guion: dict, min_nombres: int = _MIN_NOMBRES) -> list[str]:
                  if not [e for e in p.get("visual", {}).get("evidencia", []) if e in evid]]
     if evid and sin_pieza:
         out.append(f"planos sin evidencia asignada: {', '.join(sin_pieza)}")
+    # visual.tipo lo valida illustrated-narrator al cargar el guion, pero hasta
+    # el 15/10/2026 el error salía recién al generar: un guion con "archivo" en
+    # vez de "archivo_historico" quemaba los dos intentos del video y volvía
+    # como traceback en el estado del lote. Aquí se atrapa antes, y en una frase
+    # que Claude puede corregir.
+    malos = {p.get("id"): t for p in guion.get("planos", [])
+             if (t := (p.get("visual") or {}).get("tipo")) and t not in _VISUAL_TIPOS}
+    if malos:
+        out.append("visual.tipo inválido en " + ", ".join(f"{k} (\"{v}\")" for k, v in malos.items())
+                   + ". Los únicos válidos son: " + ", ".join(sorted(_VISUAL_TIPOS))
+                   + ". Para evidencia real es \"archivo_historico\"; el cierre es "
+                   "\"grafico_movimiento\"")
     for p in _contenido(guion):
         texto = p.get("narracion", "")
         for frase in re.split(r"(?<=[.!?])\s+", texto):

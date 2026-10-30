@@ -19,6 +19,7 @@ import html
 import json
 import re
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
@@ -192,21 +193,224 @@ def problemas_de_plus(guion: dict) -> list[str]:
             if revision_guion._sin_acentos(str(k.get("abajo_en", ""))).lower() not in dichas:
                 out.append(f'plus.contradiccion.abajo_en "{k.get("abajo_en")}" no es una palabra de la '
                            f'narración de {k.get("plano")}')
+    # La portada "gancho" (29/10/2026): 3 a 5 palabras gigantes en el perfil.
+    po = plus.get("portada")
+    if not isinstance(po, dict) or not str(po.get("texto", "")).strip():
+        out.append('plus.portada falta: {"texto": "3 a 5 PALABRAS", "resalta": "1 o 2 de ellas"}')
+    else:
+        texto = revision_guion._sin_acentos(po["texto"]).upper().split()
+        if not 3 <= len(texto) <= 5:
+            out.append(f'plus.portada.texto: de 3 a 5 palabras (trae {len(texto)})')
+        resalta = revision_guion._sin_acentos(str(po.get("resalta", ""))).upper().split()
+        if not 1 <= len(resalta) <= 2 or any(w not in texto for w in resalta):
+            out.append('plus.portada.resalta: 1 o 2 palabras de "texto", copiadas igual')
     return out
 
 
-def revisar(slug: str) -> str:
-    from dato_mata_gato_bot import fabrica
+def _ruta(slug: str):
+    from dato_mata_gato_bot import pipeline
+
+    return pipeline.ANDROID_IN / slug / "guion.json"
+
+
+def problemas(slug: str) -> list[str]:
+    from dato_mata_gato_bot import fabrica, instruccion_comparativa, instruccion_polemica, instruccion_viral
 
     out = fabrica.problemas_cercania(slug)
     if out == ["no se pudo leer el guion.json"]:
+        return out
+    guion = json.loads(_ruta(slug).read_text(encoding="utf-8"))
+    # Un guion de tema viral se reconoce por los tres niveles, y uno de polémica
+    # por la frase que la detonó. Sus reglas (el candado, la pieza 8, los nombres
+    # dichos, el check final) solo se revisaban DESPUÉS de entregar el lote, así
+    # que Claude las descubría en la ronda de corrección, con el guion ya
+    # escrito (16/10/2026).
+    schema = guion.get("_schema") or {}
+    if slug.startswith("guion-comparativa-") or schema.get("comparacion"):
+        # Antes de la polémica: las dos llevan "veredicto", y el 29/10/2026 a una
+        # comparativa le pidió estigma y prueba del ofensor; Claude gastó 8 pasos
+        # leyendo este código para entenderlo.
+        out += instruccion_comparativa.problemas(guion)
+    elif schema.get("tres_niveles"):
+        out += instruccion_viral.problemas(guion)
+    elif schema.get("frase") or schema.get("premisas") or schema.get("veredicto"):
+        out += instruccion_polemica.problemas(guion)
+    return out + problemas_de_forma(guion) + problemas_de_evidencia(guion) + problemas_de_plus(guion)
+
+
+# --- lo mecánico, con IA gratis (auditoría del 29/10/2026) --------------------
+# En 33 corridas de revisar, lo que más se repitió fue el largo (12; siempre de
+# más: 191 a 323 palabras), las frases de más de 20 palabras (6) y plus.mapa (9).
+# Varias rondas de Claude fueron solo por 1 o 2 palabras de más. Cuando TODO lo
+# que falla es de esto, lo arregla una IA gratis; si con eso el guion pasa,
+# Claude recibe OK. Si no, el archivo vuelve como estaba (Claude lo tiene en su
+# contexto y un archivo cambiado le obliga a releerlo).
+MECANICOS = (re.compile(r"^la narración tiene \d+ palabras"), re.compile(r"^p\d\d: frase de \d+ palabras"),
+             re.compile(r"^plus\.mapa"))
+TOPE_PALABRAS = 185  # abajo de 190 para no rebotar
+# Solo sobrepasos chicos. Probado el 29/10/2026 con 220 palabras: la IA dejó el
+# guion "pasando" pero quitó el contraste (el promedio de seiscientos setenta y un
+# pesos) y el "nadie lo prueba" del nivel 3. Recortar más es editar: va a Claude.
+MAX_SOBRA = 205
+RECORTE_MAX = 0.15
+_NUMERO = re.compile(r"^(cero|uno?|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|"
+                     r"catorce|quince|dieci\w+|veinte|veinti\w+|treinta|cuarenta|cincuenta|sesenta|setenta|"
+                     r"ochenta|noventa|cien|ciento|\w+cient[oa]s|quinient[oa]s|mil|millon|millones|"
+                     r"porciento|medio|media)$")
+# Lo único que la IA puede agregar al partir o recortar frases.
+CONECTORES = {"pero", "ademas", "entonces", "tambien", "aunque", "porque", "pues", "asi", "esto", "esta",
+              "este", "eso", "esos", "esas", "ella", "ellos", "ellas", "luego", "despues", "ahora"}
+
+
+def _vocablos(texto: str) -> set[str]:
+    return {w for w in re.findall(r"[a-zñ]+", revision_guion._sin_acentos(texto or "").lower()) if len(w) >= 4}
+
+
+# Probado el 29/10/2026: "Él dijo que entró antes" quedó "Él entró antes". Lo
+# atribuido sigue atribuido: estos verbos no se quitan.
+_ATRIBUCION = re.compile(r"^(dijo|dice|dicen|dijeron|segun|aseguro|asegura|afirmo|afirma|declaro|acuso|acusa|"
+                         r"reporto|reporta|informo|publico|publica|senalo|denuncio|explico|admitio|nego|niega|"
+                         r"respondio|contesto|sostiene|presume|presumio)$")
+
+
+_ARTICULOS = re.compile(r"\b(el|la|los|las|un|una|unos|unas)\b", re.IGNORECASE)
+
+
+def _intocables(texto: str) -> set[str]:
+    """Las cifras dichas en palabras, los nombres propios (con mayúscula a mitad
+    de frase) y los verbos de atribución."""
+    palabras = re.findall(r"[\wáéíóúñü]+", texto)
+    out = {w.lower() for w in palabras if _NUMERO.match(revision_guion._sin_acentos(w).lower())
+           or _ATRIBUCION.match(revision_guion._sin_acentos(w).lower())}
+    for frase in re.split(r"(?<=[.!?¿¡:;])\s+", texto):
+        out |= {w.lower() for w in re.findall(r"[\wáéíóúñü]+", frase)[1:] if w[:1].isupper()}
+    return out
+
+
+def _plano_nuevo(texto: str, meta: int, cita: str) -> str | None:
+    """La narración de un plano más corta y sin frases de más de 20 palabras, o
+    None si la IA agregó algo (palabras, cifras), quitó una pregunta, la cita,
+    una cifra o un nombre, o recortó de más."""
+    from dato_mata_gato_bot import ia_gratis
+
+    try:
+        r = ia_gratis.pedir(
+            "Eres editor de guiones de video corto en español de México. Reescribe esta narración "
+            f"para que tenga como máximo {meta} palabras y ninguna frase de más de 20 palabras (parte "
+            "las largas en dos). Quita SOLO palabras de relleno: ninguna frase entera, ningún dato, "
+            "ninguna cifra, ningún nombre, ningún artículo (el, la, los, un…); tiene que sonar natural "
+            "dicho en voz alta. Usa SOLO las palabras que ya están: no agregues cifras, "
+            "nombres, lugares ni ideas, y no cambies el sentido. Conserva cada pregunta (¿…?)"
+            + (f" y esta cita completa, igual: «{cita}»" if cita else "") + ". Las cifras siguen en palabras.\n\n"
+            f"Narración:\n{texto}\n\n" + 'Responde JSON: {"narracion": "<la narración nueva>"}',
+            local=False, reintentos=1)
+    except ia_gratis.SinIA:
+        return None
+    nuevo = re.sub(r"\s+", " ", str(r.get("narracion", "") if isinstance(r, dict) else "")).strip()
+    if not nuevo or re.search(r"\d", nuevo) or nuevo.count("¿") != texto.count("¿"):
+        return None
+    if _vocablos(nuevo) - _vocablos(texto) - CONECTORES:
+        return None
+    if not (1 - RECORTE_MAX) * _palabras(texto) - 1 <= _palabras(nuevo) <= _palabras(texto):
+        return None
+    if _intocables(texto) - {w.lower() for w in re.findall(r"[\wáéíóúñü]+", nuevo)}:
+        return None
+    # "Periodista José Díaz publicó lista de…": sin artículos la voz suena telegráfica (29/10/2026).
+    if len(_ARTICULOS.findall(nuevo)) < len(_ARTICULOS.findall(texto)):
+        return None
+    if cita and revision_guion._sin_acentos(cita).lower() in revision_guion._sin_acentos(texto).lower() \
+            and revision_guion._sin_acentos(cita).lower() not in revision_guion._sin_acentos(nuevo).lower():
+        return None
+    return nuevo
+
+
+def _mapa_nuevo(guion: dict) -> dict | None:
+    from dato_mata_gato_bot import ia_gratis
+
+    planos = [p for p in guion.get("planos", []) if p.get("id") in ("p00", "p01", "p02", "p03")]
+    try:
+        r = ia_gratis.pedir(
+            "De esta narración saca el lugar exacto del hecho para buscarlo en un mapa.\n"
+            + "\n".join(f"{p['id']}: {p.get('narracion', '')}" for p in planos)
+            + '\n\nResponde JSON: {"plano": "<id del plano donde la voz nombra el lugar>", "consulta": '
+            '"<edificio, calle o colonia, y la ciudad y el estado>", "etiqueta": "<máximo 32 letras, '
+            'MAYÚSCULAS, como SAN LÁZARO · CDMX>"}', local=False, reintentos=1)
+    except ia_gratis.SinIA:
+        return None
+    if not isinstance(r, dict) or r.get("plano") not in {p["id"] for p in planos} or not str(r.get("consulta", "")).strip():
+        return None
+    return {"plano": r["plano"], "consulta": str(r["consulta"]).strip(), "etiqueta": str(r.get("etiqueta", ""))[:32]}
+
+
+def arreglar_mecanico(guion: dict, fallas: list[str]) -> list[str]:
+    """Arregla en `guion` (en memoria) lo mecánico de `fallas`. Devuelve qué hizo."""
+    hecho = []
+    planos = [p for p in guion.get("planos", []) if isinstance(p, dict)]
+    schema = guion.get("_schema") or {}
+    cita = str((schema.get("frase") or {}).get("texto", "") if isinstance(schema.get("frase"), dict) else "")
+    total = sum(_palabras(p.get("narracion", "")) for p in planos)
+    if any(f.startswith("la narración tiene") for f in fallas) and not TOPE_PALABRAS < total <= MAX_SOBRA:
+        return []  # corta, o larga de más: eso es editar y va a Claude
+    metas: dict[str, int] = {}
+    obligados = set()  # los de frase larga se aplican siempre
+    for f in fallas:
+        if m := re.match(r"^(p\d\d): frase de", f):
+            obligados.add(m.group(1))
+            metas[m.group(1)] = _palabras(next((p.get("narracion", "") for p in planos if p.get("id") == m.group(1)), ""))
+    largo = TOPE_PALABRAS < total <= MAX_SOBRA and any(f.startswith("la narración tiene") for f in fallas)
+    if largo:
+        # Se le pide recorte a todos (nunca a p00, el gancho, ni a p08, el cierre con la
+        # pregunta y la frase del canal), hasta RECORTE_MAX cada uno: la IA a veces quita
+        # un nombre y ese plano se tira, así que hacen falta de dónde escoger.
+        for p in planos:
+            if p.get("id") not in ("p00", "p08") and (n := _palabras(p.get("narracion", ""))) >= 8:
+                metas[p["id"]] = min(metas.get(p["id"], n), n - max(1, int(n * RECORTE_MAX)))
+    por_id = {p.get("id"): p for p in planos}
+    with ThreadPoolExecutor(8) as pool:
+        nuevos = dict(zip(metas, pool.map(lambda i: _plano_nuevo(por_id[i].get("narracion", ""), metas[i], cita), metas)))
+    # Primero los obligados; luego los que más recortan, solo hasta bajar de 190.
+    ahorro = {i: _palabras(por_id[i].get("narracion", "")) - _palabras(x) for i, x in nuevos.items() if x}
+    usar = [i for i in nuevos if nuevos[i] and i in obligados]
+    total -= sum(ahorro[i] for i in usar)
+    for i in sorted((i for i in ahorro if i not in obligados), key=lambda i: -ahorro[i]):
+        if not largo or total <= 190:
+            break
+        usar.append(i)
+        total -= ahorro[i]
+    for i, nuevo in ((i, nuevos[i]) for i in usar):
+        if nuevo and nuevo != por_id[i].get("narracion", "").strip():
+            antes = _palabras(por_id[i].get("narracion", ""))
+            por_id[i]["narracion"] = nuevo
+            hecho.append(f"{i}: de {antes} a {_palabras(nuevo)} palabras, frases partidas")
+    if any(f.startswith("plus.mapa") for f in fallas) and (mapa := _mapa_nuevo(guion)):
+        guion.setdefault("plus", {})["mapa"] = mapa
+        hecho.append(f"plus.mapa: {mapa['consulta']} ({mapa['plano']})")
+    return hecho
+
+
+def revisar(slug: str) -> str:
+    out = problemas(slug)
+    if out == ["no se pudo leer el guion.json"]:
         return "\n".join(out)
-    guion = json.loads((fabrica.pipeline.ANDROID_IN / slug / "guion.json").read_text(encoding="utf-8"))
-    out += problemas_de_forma(guion) + problemas_de_evidencia(guion) + problemas_de_plus(guion)
+    if out and all(any(m.match(f) for m in MECANICOS) for f in out):
+        original = _ruta(slug).read_text(encoding="utf-8")
+        guion = json.loads(original)
+        hecho = arreglar_mecanico(guion, out)
+        if hecho:
+            _ruta(slug).write_text(json.dumps(guion, ensure_ascii=False, indent=2), encoding="utf-8")
+            if not problemas(slug):
+                return ("OK: el guion pasa todas las revisiones automáticas. Lo mecánico lo arreglé yo "
+                        "con IA gratis, sin cambiar datos (el guion.json cambió: si lo vas a tocar, léelo "
+                        "antes):\n" + "\n".join(f"- {h}" for h in hecho))
+            _ruta(slug).write_text(original, encoding="utf-8")
     if not out:
         return "OK: el guion pasa todas las revisiones automáticas."
-    return ("Corrige TODO esto de una vez (reescribe el guion.json completo con Write, no con "
-            "varios Edit) y vuelve a correr revisar:\n" + "\n".join(f"- {p}" for p in out))
+    # Con Edit, todos en la MISMA respuesta (29/10/2026): reescribir el guion
+    # completo costaba 7-15k de salida por ronda; un Edit, unos cientos. La
+    # corrección era el 36 % del gasto de la fábrica.
+    return ("Corrige TODO esto de una vez: con Edit, todos los Edit en la MISMA respuesta (solo "
+            "reescribe el guion.json completo con Write si cambias más de la mitad), y vuelve a "
+            "correr revisar:\n" + "\n".join(f"- {p}" for p in out))
 
 
 def main(argv: list[str]) -> int:

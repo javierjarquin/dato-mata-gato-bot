@@ -583,6 +583,50 @@ def _generar_silencio(dest_dir: Path, plano_id: str, segundos: float) -> Path:
     return destino
 
 
+def _recortar_pausas(wav: Path, dest_dir: Path) -> Path:
+    """Copia del plano con el volumen ajustado; no toca el WAV original y va
+    DESPUÉS de la verificación con Whisper de tts-kokoro. Si ffmpeg falla, se
+    usa el original.
+
+    21/10/2026: la voz va CRUDA, solo con el volumen. Javier oyó un "bzz" antes
+    y después de las frases en el video y no en la voz cruda: lo metía este
+    paso. El filtro de ruido (afftdn) lo duplicaba (140 -> 240 ms en el gancho
+    de la cafetería), y la compuerta y el recorte de pausas, que cortan la voz
+    en el borde de las palabras, lo dejaban "un poco más" que en la cruda. Por
+    eso quedan APAGADOS por defecto (RECORTAR_PAUSAS=1 y LIMPIAR_RUIDO=1 los
+    regresan); el recorte solo ahorraba ~1.6 s por video."""
+    filtros = []
+    # Silencio limpio entre frases con una compuerta firme. NO usar afftdn.
+    if (os.getenv("LIMPIAR_RUIDO") or "0").strip() == "1":
+        filtros.append("agate=threshold=0.02:ratio=9000:attack=1:release=250:range=0:knee=1")
+    if (os.getenv("RECORTAR_PAUSAS") or "0").strip() == "1":
+        try:
+            tope = float(os.getenv("RECORTAR_PAUSAS_SEG") or 0.25)
+        except ValueError:
+            tope = 0.25
+        filtros.append(f"silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.06:"
+                       f"stop_periods=-1:stop_duration={tope}:stop_threshold=-45dB:stop_silence={tope}:"
+                       f"detection=peak")
+    # Volumen de la voz (21/10/2026, Javier: "bájale como 2 puntos"). El render
+    # de Remotion usa narracion.wav tal cual, sin normalizar: la voz mexicana
+    # salía a -18.1 LUFS en el video, la anterior a -19.3. VOZ_GANANCIA_DB=0 lo deja igual.
+    try:
+        ganancia = float(os.getenv("VOZ_GANANCIA_DB") or -2)
+    except ValueError:
+        ganancia = -2.0
+    if ganancia:
+        filtros.append(f"volume={ganancia}dB")
+    if not filtros:
+        return wav
+    salida = dest_dir / "_voz" / wav.name
+    salida.parent.mkdir(parents=True, exist_ok=True)
+    proc = _run([FFMPEG, "-y", "-i", str(wav), "-af", ",".join(filtros), "-acodec", "pcm_s16le", str(salida)])
+    if proc.returncode != 0 or not salida.exists():
+        logger.warning("No se pudieron recortar las pausas de %s, va el original", wav.name)
+        return wav
+    return salida
+
+
 def _setup_narrator_project(slug: str) -> None:
     src_guion = TTS_KOKORO_PROJECTS / slug / "guion.json"
     dest_dir = NARRATOR_PROJECTS / slug
@@ -597,6 +641,8 @@ def _setup_narrator_project(slug: str) -> None:
     with list_path.open("w", encoding="utf-8") as f:
         for plano in planos:
             wav = wav_dir / f"{plano['id']}.wav"
+            if slug.startswith("guion-"):
+                wav = _recortar_pausas(wav, dest_dir)
             f.write(f"file '{wav.as_posix()}'\n")
             pausa = _pausa_despues_seg(plano)
             if pausa:
@@ -1080,11 +1126,11 @@ def _juntar_multimedia(slug: str) -> str:
 
 
 def variante_portada(slug: str) -> str:
-    """Estilo de la portada. Javier eligió la A, "la nota" (14/10/2026): el
-    titular real como recorte de periódico y la cifra abajo. PORTADA_VARIANTE=dato
-    cambia a la B. Si el video no tiene nota con captura, portada.py arma la B
-    sola (es la misma imagen sin el recorte)."""
-    return (os.getenv("PORTADA_VARIANTE") or "nota").strip().lower()
+    """Estilo de la portada. Desde el 29/10/2026 la C, "el gancho": fondo sólido
+    oscuro y 3 a 5 palabras (plus.portada) arriba a la izquierda; las capturas de
+    nota se leían como ruido en el perfil. PORTADA_VARIANTE=nota vuelve a la A
+    (titular real como recorte) y =dato a la B."""
+    return (os.getenv("PORTADA_VARIANTE") or "gancho").strip().lower()
 
 
 def _pegar_portada(final: Path, portada: Path) -> bool:
@@ -1132,7 +1178,7 @@ def _portadas(slug: str, final: Path) -> str:
     elegida = variante_portada(slug)
     elegida = elegida if elegida in hechas else hechas[0]
     pegada = _pegar_portada(final, proyecto / f"portada_{elegida}.jpg")
-    etiqueta = {"nota": "A (la nota)", "dato": "B (el dato)"}[elegida]
+    etiqueta = {"nota": "A (la nota)", "dato": "B (el dato)", "gancho": "C (el gancho)"}[elegida]
     return f"portada {etiqueta}" + (" en el primer cuadro" if pegada else " (no se pudo pegar)")
 
 
@@ -1189,8 +1235,8 @@ def _archivar_local(slug: str, final_mp4: Path, carpeta: Path) -> Path:
         destino = carpeta / f"{base}_{n}.mp4"
         n += 1
     shutil.copy2(final_mp4, destino)
-    # Las portadas viajan con el video (14/10/2026): <nombre>_portada_nota.jpg y _dato.jpg.
-    for v in ("nota", "dato"):
+    # Las portadas viajan con el video (14/10/2026): <nombre>_portada_<estilo>.jpg.
+    for v in ("nota", "dato", "gancho"):
         portada = final_mp4.parent / f"portada_{v}.jpg"
         if portada.exists():
             shutil.copy2(portada, destino.with_name(f"{destino.stem}_portada_{v}.jpg"))
