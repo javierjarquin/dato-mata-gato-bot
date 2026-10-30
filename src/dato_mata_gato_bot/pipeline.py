@@ -1133,13 +1133,18 @@ def variante_portada(slug: str) -> str:
     return (os.getenv("PORTADA_VARIANTE") or "gancho").strip().lower()
 
 
+# 30/10/2026: con 1/30 s TikTok no la tomaba como portada (escogió 0.13 s y 7 s
+# en los dos primeros videos con la gancho). Prueba con 0.2 s = 6 cuadros.
+DURACION_PORTADA = "0.2"
+
+
 def _pegar_portada(final: Path, portada: Path) -> bool:
-    """La portada como PRIMER cuadro (1/30 s): TikTok usa el primer cuadro si
-    no se elige otra, y en Remotion ahí el contador estaba en 0 ("QUEDAN 0")."""
+    """La portada al inicio del video durante DURACION_PORTADA (con silencio),
+    para que TikTok la tome o se pueda escoger fácil en "Editar portada"."""
     tmp = final.with_name("final_con_portada.mp4")
     r = subprocess.run(
-        ["ffmpeg", "-v", "error", "-y", "-loop", "1", "-framerate", "30", "-t", "0.0334", "-i", str(portada),
-         "-f", "lavfi", "-t", "0.0334", "-i", "anullsrc=r=48000:cl=stereo", "-i", str(final),
+        ["ffmpeg", "-v", "error", "-y", "-loop", "1", "-framerate", "30", "-t", DURACION_PORTADA, "-i", str(portada),
+         "-f", "lavfi", "-t", DURACION_PORTADA, "-i", "anullsrc=r=48000:cl=stereo", "-i", str(final),
          "-filter_complex", "[0:v]scale=1080:1920,setsar=1,fps=30,format=yuv420p[c];"
          "[2:v]setsar=1,fps=30,format=yuv420p[v];[2:a]aresample=48000,aformat=channel_layouts=stereo[a2];"
          "[c][1:a][v][a2]concat=n=2:v=1:a=1[ov][oa]",
