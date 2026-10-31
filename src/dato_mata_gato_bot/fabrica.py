@@ -656,10 +656,41 @@ async def _guiones_comparativa(avisador, tema: str | None, cantidad: int,
     return buenos, sesiones
 
 
-# Cómo se escribe y con qué vigencia queda cada fórmula de redes.
+def problemas_tradiciones(slug: str) -> list[str]:
+    """Revisión sin Claude de un guion de tradiciones (30/10/2026): no tiene planos
+    ni evidencia, así que no pasa por problemas_cercania; lleva la suya."""
+    from dato_mata_gato_bot import instruccion_tradiciones
+
+    try:
+        guion = json.loads((pipeline.ANDROID_IN / slug / "guion.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ["no se pudo leer el guion.json"]
+    return instruccion_tradiciones.problemas(guion)
+
+
+async def _guiones_tradiciones(avisador, tema: str | None, cantidad: int,
+                               ligera: bool | None = None) -> tuple[list[dict], list[str]]:
+    """Un lote del nicho "el porqué de las tradiciones": las IA gratis escogen el
+    tema y leen las fuentes; Claude escribe el texto y las escenas 3D."""
+    from dato_mata_gato_bot import bot, expediente_tradiciones, instruccion_tradiciones
+
+    ligera = sesion_ligera() if ligera is None else ligera
+    ya = bot._ya_cubiertos("guion-tradicion-")
+    texto = instruccion_tradiciones.instruccion(cantidad, tema, ya, ligera=ligera)
+    texto = await asyncio.to_thread(expediente_tradiciones.agregar, texto, tema, cantidad, ya, telegram)
+    buenos, sesiones = await _escribir_y_rescatar(
+        avisador, "la tradición", texto, cantidad, "guion-tradicion-", problemas_tradiciones, ligera)
+    for g in buenos:
+        g["vigencia"] = "perenne"
+    return buenos, sesiones
+
+
+# Cómo se escribe y con qué vigencia queda cada fórmula de redes. "tradiciones"
+# (30/10/2026) va por el mismo camino, pero no entra en la mezcla de /lotegrande.
 FORMULAS_REDES = {"polemica": ("_guiones_de_polemica", "conversacion"),
                   "viral": ("_guiones_virales", "conversacion"),
-                  "comparativa": ("_guiones_comparativa", "perenne")}
+                  "comparativa": ("_guiones_comparativa", "perenne"),
+                  "tradiciones": ("_guiones_tradiciones", "perenne")}
 
 
 def en_sesiones(cantidad: int) -> list[int]:
@@ -1006,12 +1037,13 @@ def video(lote: str, slug: str) -> None:
         telegram(f"🎬 {slug} ({(time.time() - inicio) / 60:.0f} min)" + (f"\n{etiqueta}" if etiqueta else "")
                  + (f"\n\n{publicar}" if publicar else "")
                  + f"\n\n{r.mensaje[-700:]}", liviano if liviano.exists() else None)
-        # La portada (estilo A, la nota) para subirla al publicar; ya va en el primer cuadro.
+        # La portada para subirla al publicar; ya va en el primer cuadro. Desde el
+        # 29/10/2026 es la gancho, que aquí no estaba y no llegaba.
         proyecto = pipeline.NARRATOR_PROJECTS / slug
         pegada = pipeline.variante_portada(slug)
         telegram_fotos([(proyecto / f"portada_{v}.jpg",
                          "Portada"
-                         + (" (ya va en el primer cuadro)" if v == pegada else "")) for v in ("nota", "dato")])
+                         + (" (ya va en el primer cuadro)" if v == pegada else "")) for v in ("nota", "dato", "gancho")])
         limpiar(slug, liviano)
     print("RESULTADO " + json.dumps({"ok": r.ok, "mensaje": r.mensaje[-1500:]}, ensure_ascii=False),
           flush=True)
