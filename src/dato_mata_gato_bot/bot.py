@@ -586,6 +586,8 @@ HELP_TEXT = """Comandos disponibles — flujo típico: /nuevovideo → mandar gu
   Ejemplos: /lotegrande 20 dia cercania · /lotegrande 15 0-9 cancun
   Con "variado": el lote viejo de crimen + trivia (seis formatos). Solo escribe
   los guiones; generarlos es /generargrande. Ejemplo: /lotegrande 15 variado
+  Con "tradiciones": el porqué de las tradiciones en 3D (ver /tradicion).
+  Ejemplo: /lotegrande 10 dia tradiciones
   Estado: /fabrica · Detener: /pararfabrica
 
 /temaviral [cantidad] [tema]
@@ -621,6 +623,18 @@ HELP_TEXT = """Comandos disponibles — flujo típico: /nuevovideo → mandar gu
   Ejemplos: /polemica 3 conalep bandidos del jale
             /polemica 3      → Claude busca las polémicas de la semana
   Estado: /fabrica · Detener: /pararfabrica
+
+/tradicion [cantidad] [tema]
+  El porqué de las tradiciones: una pregunta sobre un objeto ("¿por qué el papel
+  picado tiene que moverse?"), la respuesta que sorprende, el origen, la historia
+  de fondo y "mándaselo a…". Video 3D estilo juguete: modelos libres (Kenney, CC0)
+  y objetos hechos por código, sin IA ni personas. Solo temas cuyo objeto existe
+  en la biblioteca: la calaverita, el pan de muerto o la piñata todavía no.
+  Las IA gratis leen Wikipedia, INAH, UNAM y gob.mx antes que Claude; el saber
+  popular va atribuido ("dicen que…") y lo falso no entra.
+  Ejemplos: /tradicion 2 papel picado
+            /tradicion 2     → escoge de las fiestas que vienen
+  En la fábrica: /lotegrande 10 dia tradiciones
 
 /generargrande
   Genera el lote grande pendiente y lo ARCHIVA sin publicar: nada va a Drive ni
@@ -785,6 +799,7 @@ BOT_COMMANDS = [
     ("temaviral", "Tema viral [cantidad] [tema] (sin tema, busca tendencias)"),
     ("polemica", "Polémica [cantidad] [tema] (cuando lo viral lo detonó una opinión)"),
     ("comparativa", "Comparativa [cantidad] [tema]: ahora vs antes, ¿quién lo hace mejor?"),
+    ("tradicion", "El porqué de las tradiciones [cantidad] [tema] (video 3D)"),
     ("fabrica", "Cómo va la fábrica automática"),
     ("pararfabrica", "Detener la fábrica automática"),
     ("generargrande", "Generar el lote grande y archivarlo sin publicar"),
@@ -1087,7 +1102,7 @@ async def cmd_lotegrande(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     for arg in context.args or []:
         if arg.isdigit():
             n = int(arg)
-        elif arg.lower() in ("redes", "cercania", "variado"):
+        elif arg.lower() in ("redes", "cercania", "variado", "tradiciones"):
             modo = arg.lower()
         elif arg.lower() in temas:
             tema = arg.lower()
@@ -1102,10 +1117,11 @@ async def cmd_lotegrande(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 "     /lotegrande 20 dia cercania [tema] → contradicción local, automático\n"
                 "     /lotegrande 15 0-9 cancun          → contradicción local, Claude de 0 a 9 h\n"
                 "     /lotegrande 15 variado             → el lote viejo de crimen + trivia (solo escribe)\n"
+                "     /lotegrande 10 dia tradiciones     → el porqué de las tradiciones (3D), automático\n"
                 f"Temas con la fórmula de cercanía: {', '.join(temas)}")
             return
-    if modo == "redes":
-        await _lotegrande_automatico(update, n, horario or "", None, formato="redes")
+    if modo in ("redes", "tradiciones"):
+        await _lotegrande_automatico(update, n, horario or "", None, formato=modo)
         return
     if modo == "variado":
         await _pedir_lote(update, context, formatos.repartir, cantidad=n)
@@ -1152,8 +1168,18 @@ _FORMULAS_VIRALES = {
                    "otro lado) · cuál funciona mejor y por qué, con lo bueno y lo malo de cada lado.",
                    "• Cada guion necesita UN indicador medido igual en los dos lados, la fuente en "
                    "pantalla, y pasar la prueba del espejo (sin lenguaje de campaña)."]},
+    "tradiciones": {
+        "comando": "tradicion", "titulo": "🏵 El porqué de las tradiciones", "ejemplo": "papel picado",
+        "busca": "las fiestas que vienen, con las IA gratis",
+        "lineas": ["• Fórmula de 9 tiempos: la pregunta sobre un objeto · la respuesta que sorprende · "
+                   "el origen · la historia de fondo · la idea · de vuelta al objeto · tú hoy · mándaselo a…",
+                   "• Video 3D estilo juguete (modelos libres + código, sin IA ni personas). Solo temas "
+                   "cuyo objeto existe en la biblioteca.",
+                   "• Cada dato con fuente; el saber popular va atribuido (\"dicen que…\") y lo falso "
+                   "no entra."]},
 }
-_NOMBRE_FORMULA = {"polemica": "polémica", "viral": "tema viral", "comparativa": "comparativa"}
+_NOMBRE_FORMULA = {"polemica": "polémica", "viral": "tema viral", "comparativa": "comparativa",
+                   "tradiciones": "tradiciones"}
 
 
 async def _arrancar_viral(update: Update, context: ContextTypes.DEFAULT_TYPE,
@@ -1241,6 +1267,15 @@ async def cmd_comparativa(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await _arrancar_viral(update, context, "comparativa")
 
 
+async def cmd_tradicion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Lote del nicho EL PORQUÉ DE LAS TRADICIONES (30/10/2026): video 3D.
+
+    Uso: /tradicion [cantidad] [tema...]   ·   /tradicion 2 papel picado
+         /tradicion 2                      → las IA gratis escogen de la temporada
+    """
+    await _arrancar_viral(update, context, "tradiciones")
+
+
 # Tramo "cercania:<tema>" de /lotegrande (fórmula de la contradicción local).
 CERCANIA = "cercania:"
 
@@ -1291,7 +1326,7 @@ async def _lotegrande_automatico(update: Update, n: int, horario: str, tema: str
             + "\n".join(fabrica.resumen(e) for e in activas)
             + "\n\nEspera a que termine o detenla con /pararfabrica.")
         return
-    lote = f"{'redes' if formato == 'redes' else 'auto'}-{datetime.now():%Y%m%d-%H%M}"
+    lote = f"{formato if formato in ('redes', 'tradiciones') else 'auto'}-{datetime.now():%Y%m%d-%H%M}"
     estado = fabrica.crear(lote, n, formato, horas_claude=horario, tema=tema,
                            vigencias=formato == "cercania", **_DE_DOS_EN_DOS)
     # La tarea de Windows la retoma cada 15 min; el primer ciclo arranca ya.
@@ -1311,6 +1346,15 @@ async def _lotegrande_automatico(update: Update, n: int, horario: str, tema: str
             f"{_VIDEOS_POR_VENTANA} guiones por ventana de 5 h.\n"
             f"• Generar todo toma ~{n * 45 / 60:.0f} h. Cada video te llega aquí al terminar; se "
             f"archiva en {estado['carpeta_videos']} sin publicar.\n"
+            "Estado: /fabrica · Detener: /pararfabrica")
+        return
+    if formato == "tradiciones":
+        f = _FORMULAS_VIRALES["tradiciones"]
+        await update.message.reply_text(
+            f"{f['titulo']}: fábrica {lote} en marcha, {n} videos.\n" + "\n".join(f["lineas"]) + "\n"
+            f"• De 2 en 2. Claude escribe {'todo el día' if not horario else f'solo de {horario} h'}, hasta "
+            f"{_VIDEOS_POR_VENTANA} guiones por ventana de 5 h. Cada video te llega aquí y se archiva en "
+            f"{estado['carpeta_videos']} sin publicar.\n"
             "Estado: /fabrica · Detener: /pararfabrica")
         return
     temas = {c: nombre for c, nombre, _ in instruccion_cercania.TEMAS}
@@ -2766,6 +2810,7 @@ def main() -> None:
     app.add_handler(CommandHandler("temaviral", cmd_temaviral))
     app.add_handler(CommandHandler("polemica", cmd_polemica))
     app.add_handler(CommandHandler("comparativa", cmd_comparativa))
+    app.add_handler(CommandHandler("tradicion", cmd_tradicion))
     app.add_handler(CommandHandler("fabrica", cmd_fabrica))
     app.add_handler(CommandHandler("pararfabrica", cmd_pararfabrica))
     app.add_handler(CommandHandler("iaclaude", cmd_iaclaude))
