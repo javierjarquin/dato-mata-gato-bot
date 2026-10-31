@@ -382,19 +382,30 @@ def de_la_bolsa(formula: str, sacar: bool = True) -> list[dict]:
     return [t for t in temas if not t["fecha"] or t["fecha"].timestamp() >= viejo]
 
 
-def datos(titulo: str, notas: list[dict], pregunta: str | None = None, reintentos: int | None = None) -> list[dict]:
+TIPOS_DE_DATO = ("hecho", "saber_popular", "falso")
+
+
+def datos(titulo: str, notas: list[dict], pregunta: str | None = None, reintentos: int | None = None,
+          que: str | None = None, tipos: bool = False) -> list[dict]:
     """Datos con cita textual; solo quedan los que la cita está literal en su nota.
-    Con `pregunta`, solo los que la contestan (el comando buscar)."""
+    Con `pregunta`, solo los que la contestan (el comando buscar). Con `tipos`
+    (tradiciones, 30/10/2026), cada uno dice si es hecho, saber popular o falso."""
     cuerpo = "\n\n".join(f"[{i}] {n['medio']}\n{n['texto']}" for i, n in enumerate(notas))
-    que = (f"Saca de 3 a 5 datos que contesten esta pregunta: {pregunta}. Si ninguna nota la "
-           "contesta, responde la lista vacía." if pregunta else
-           "Saca los datos que sirven para contar este hecho en un video: cifras, fechas, nombres "
-           "con cargo, lugares exactos y frases dichas por alguien.")
+    que = que or (f"Saca de 3 a 5 datos que contesten esta pregunta: {pregunta}. Si ninguna nota la "
+                  "contesta, responde la lista vacía." if pregunta else
+                  "Saca los datos que sirven para contar este hecho en un video: cifras, fechas, nombres "
+                  "con cargo, lugares exactos y frases dichas por alguien.")
+    tipo = ""
+    if tipos:
+        que += (' Marca cada dato con "tipo": "hecho" (la fuente lo da como documentado), "saber_popular" '
+                '(la fuente dice que es creencia, tradición o algo que "se dice") o "falso" (la fuente dice '
+                "que es un mito falso o un error común).")
+        tipo = ', "tipo": "hecho|saber_popular|falso"'
     r = ia_gratis.pedir(
         f"Tema: {titulo}\n\nNotas:\n{cuerpo}\n\n{que} Para cada uno copia la CITA "
         "tal cual viene en la nota (de 6 a 30 palabras, sin cambiar ni una letra). No inventes: "
         "si no está escrito en la nota, no va.\n"
-        'Responde JSON: {"datos": [{"dato": "<en tus palabras>", "cita": "<copia literal>", "nota": <número>}]}',
+        f'Responde JSON: {{"datos": [{{"dato": "<en tus palabras>", "cita": "<copia literal>", "nota": <número>{tipo}}}]}}',
         rapido=True,  # una llamada por tema: la cuota gratis de 3.8 se acabó a la mitad (27/10)
         local=False,  # Ollama inventa citas; mejor sin datos que con datos falsos
         reintentos=reintentos)
@@ -412,6 +423,8 @@ def datos(titulo: str, notas: list[dict], pregunta: str | None = None, reintento
         # La cita se comprueba, la paráfrasis no: el 29/10/2026 Gemini puso "21.8
         # millones" en un dato cuya cita solo decía "23,7 por ciento".
         d["cifras_fuera"] = sorted(_cifras(str(d.get("dato", ""))) - _cifras(d["cita"]))
+        if tipos and d.get("tipo") not in TIPOS_DE_DATO:
+            d["tipo"] = "saber_popular"  # sin marca clara, se dice atribuido: es lo seguro
         out.append(d)
     return out
 

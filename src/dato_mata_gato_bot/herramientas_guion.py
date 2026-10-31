@@ -214,8 +214,12 @@ def _ruta(slug: str):
 
 
 def problemas(slug: str) -> list[str]:
-    from dato_mata_gato_bot import fabrica, instruccion_comparativa, instruccion_polemica, instruccion_viral
+    from dato_mata_gato_bot import (fabrica, instruccion_comparativa, instruccion_polemica, instruccion_tradiciones,
+                                    instruccion_viral)
 
+    # Tradiciones (30/10/2026) no tiene planos ni evidencia: escenas 3D, revisión propia.
+    if slug.startswith("guion-tradicion-"):
+        return fabrica.problemas_tradiciones(slug)
     out = fabrica.problemas_cercania(slug)
     if out == ["no se pudo leer el guion.json"]:
         return out

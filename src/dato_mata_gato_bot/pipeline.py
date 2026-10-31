@@ -1243,6 +1243,71 @@ def _archivar_local(slug: str, final_mp4: Path, carpeta: Path) -> Path:
     return destino
 
 
+# --- Nicho de tradiciones (30/10/2026) ----------------------------------------
+# Video 3D hecho con código (illustrated-narrator/tradiciones_3d): no pasa por
+# tts-kokoro ni por `narrator generate`. render.py hace la voz Fish 3 por escena,
+# Whisper y el render de Remotion (~1 min por cada 75 s); aquí se le pega la
+# portada y se archiva como cualquier otro video.
+TRADICIONES_DIR = Path(r"C:\illustrated-narrator\tradiciones_3d")
+TIMEOUT_TRADICIONES = 90 * 60  # casi todo es la voz: ~13x el largo del audio
+
+
+def es_tradicion(slug: str) -> bool:
+    try:
+        guion = json.loads((ANDROID_IN / slug / "guion.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(guion, dict) and guion.get("formato") == "tradiciones"
+
+
+def run_tradiciones(slug: str, progreso, destino_local: Path | None = None) -> PipelineResult:
+    from dato_mata_gato_bot import fabrica, instruccion_tradiciones  # import tardío: fabrica importa este módulo
+
+    guion = json.loads((ANDROID_IN / slug / "guion.json").read_text(encoding="utf-8"))
+    if problemas := instruccion_tradiciones.problemas(guion):
+        return PipelineResult(False, f"{slug}: el guion no pasa la revisión:\n"
+                              + "\n".join(f"- {p}" for p in problemas), necesita_claude=True)
+    if problema := fabrica.asegurar_infra():
+        return PipelineResult(False, f"La voz no está disponible: {problema}", necesita_claude=False)
+    progreso("voz Fish 3, Whisper y render 3D (tradiciones)")
+    salida = TRADICIONES_DIR / "out" / f"{slug}.mp4"
+    salida.unlink(missing_ok=True)
+    try:
+        proc = subprocess.run(
+            [NARRATOR_PY, str(TRADICIONES_DIR / "scripts" / "render.py"), slug],
+            cwd=TRADICIONES_DIR, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=TIMEOUT_TRADICIONES, env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except subprocess.TimeoutExpired:
+        return PipelineResult(False, f"render 3D: se pasó de {TIMEOUT_TRADICIONES // 60} min", necesita_claude=False)
+    finally:
+        shutil.rmtree(TRADICIONES_DIR / "public" / slug, ignore_errors=True)
+    if proc.returncode != 0 or not salida.exists() or salida.stat().st_size < 100_000:
+        logger.error("render 3D falló para %s:\n%s\n%s", slug, proc.stdout[-3000:], proc.stderr[-3000:])
+        return PipelineResult(False, "render 3D falló:\n" + (proc.stderr or proc.stdout)[-1500:],
+                              necesita_claude=False)
+    # El proyecto del narrador es donde el resto del pipeline (portada, archivo,
+    # limpieza de la fábrica) espera el video y el guion.
+    proyecto = NARRATOR_PROJECTS / slug
+    proyecto.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ANDROID_IN / slug / "guion.json", proyecto / "guion.json")
+    final = proyecto / "final.mp4"
+    final.unlink(missing_ok=True)
+    shutil.move(str(salida), str(final))
+    tiempos = [ln for ln in proc.stdout.splitlines() if ln.startswith(("voz lista", "render:"))]
+    progreso("portada")
+    notas = "\n".join(["render: 3D de tradiciones (" + "; ".join(tiempos) + ")",
+                       instruccion_tradiciones.resumen_visual(guion), _portadas(slug, final)])
+    if destino_local is None:
+        return PipelineResult(True, f"Video listo: {final}\n{notas}")
+    progreso("archivando el video")
+    try:
+        destino = _archivar_local(slug, final, destino_local)
+    except Exception as exc:  # noqa: BLE001 -- el video existe, solo falló la copia
+        return PipelineResult(False, f"Video generado pero no se pudo archivar:\n{exc}", necesita_claude=True)
+    return PipelineResult(True, f"Video listo: {destino}\n{notas}")
+
+
 def run(slug: str, voz: str, chat_id: int | None = None,
         avatar: bool = False, avatar_num: int | None = None,
         destino_local: Path | None = None) -> PipelineResult:
@@ -1258,6 +1323,8 @@ def run(slug: str, voz: str, chat_id: int | None = None,
     guion_src = ANDROID_IN / slug / "guion.json"
     if not guion_src.exists():
         return PipelineResult(False, f"No existe {guion_src}", necesita_claude=False)
+    if es_tradicion(slug):
+        return run_tradiciones(slug, progreso, destino_local)
     # Evidencia real (29/09/2026): si el guion trae su lista de evidencia, se
     # arma ANTES de todo y el video sale sin una sola imagen de IA. Va antes de
     # _stage_guion_for_tts porque preparar() escribe en el guion (movimiento
