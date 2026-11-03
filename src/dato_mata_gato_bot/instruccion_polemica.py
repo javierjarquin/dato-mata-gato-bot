@@ -325,10 +325,11 @@ ESTRUCTURA (9 planos, ids p00 a p08)
   de quien la dijo. NINGÚN año ni fecha dichos.
   Bien: "Un podcast les dijo bandidazos. Ochocientas mil vistas le contestaron."
   Mal: "El Conalep está lleno de bandidos." (eso dice el insulto en voz del canal)
-- p01 "hook_tercera_persona": "Te imaginas a quien…" + A QUIÉN LE TOCA (pieza 1) + QUÉ PASÓ
+- p01 "hook_tercera_persona": la apertura + A QUIÉN LE TOCA (pieza 1) + QUÉ PASÓ
   (quién la dijo con su rol, a quién, dónde y en qué situación) + LA FRASE COMPLETA, atribuida +
-  la primera PREGUNTA directa a quien ve, antes del segundo diez: "¿A ti también te lo dijeron?".
-  Puede ser de tres frases. Es la prueba del que llega sin saber.
+  la primera PREGUNTA directa a quien ve, antes del segundo diez, de SÍ O NO: "¿A ti también te
+  lo dijeron?". Puede ser de tres frases. Es la prueba del que llega sin saber.
+<<APERTURAS>>
 - p02 "contexto": LA RESPUESTA, CITADA. Quién contestó, con su nombre, su edad o su rol, y sus
   palabras textuales. Es el corazón del video.
 - p03 "el_hecho": EL DATO QUE REENCUADRA, contestando a la premisa, con su fuente dicha. Va la
@@ -499,7 +500,8 @@ def instruccion(n: int, tema: str | None, ya_hechos: str, ligera: bool = False) 
                        "ofendido.")
     else:
         descripcion = BUSCAR_TENDENCIAS.replace("<<CUANTOS>>", str(n))
-    texto = INSTRUCCION.replace("<<N>>", str(n)).replace("<<TEMA>>", descripcion)
+    texto = (INSTRUCCION.replace("<<N>>", str(n)).replace("<<TEMA>>", descripcion)
+             .replace("<<APERTURAS>>", instruccion_cercania.APERTURAS_P01))
     if ligera:
         texto = texto.replace("\nAL TERMINAR responde",
                               instruccion_cercania.COMO_TRABAJAR + "\nAL TERMINAR responde")

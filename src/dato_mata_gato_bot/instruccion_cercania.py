@@ -73,7 +73,7 @@ guion tiene que tener LOS CUATRO; si le falta uno, busca otro tema:
      primero por esto y después por qué tan reciente es. En "6_hace_hablar" escribe qué
      experiencia va a contar la gente en los comentarios.
 La narración le HABLA a esa persona: "tu recibo", "tu colonia", "si vives en…", "la próxima vez
-que cargues gasolina…". El "te imaginas a quien…" de p01 es alguien como ella. El gancho (p00)
+que cargues gasolina…". La apertura de p01 presenta a alguien como ella. El gancho (p00)
 junta 1 y 3: el dato que la toca, con lo que no cuadra.
 En "_schema.condiciones" escribe, una por una, cómo cumple el guion cada pieza (con la fecha
 del dato en la 2). Un guion al que le falte una se descarta en la revisión.
@@ -86,6 +86,13 @@ LO QUE SUMA (no es obligatorio, pero un guion que lo tiene vale más)
      esto antes de comprar". Escríbelo en "_schema.condiciones.7_valor_practico".
   - "Lo que casi nadie sabe" (moneda social: se comparte lo que hace ver enterado al que lo
     comparte), dicho con hechos, no como promesa vacía.
+  - EL CASO DE AQUÍ QUE DESTAPA UN NÚMERO NACIONAL (03/11/2026: es la forma que más se
+    comparte). El caso concreto y local entra por la pieza 1, y en p06 sale la cifra que
+    aplica en cualquier estado: "en Iztapalapa cuatrocientas treinta y nueve denuncias; en
+    Puebla mil carpetas y once sentencias". Así se comparte de los dos lados: el de aquí
+    porque le toca, el de fuera porque el número también es el suyo. Un caso que solo
+    importa en su municipio no sale de su municipio aunque cumpla las seis piezas.
+    Escríbelo en "_schema.condiciones.7_valor_practico" junto con lo práctico.
   - El final pesa más que el resto (regla pico-final): p07 cierra con la frase más fuerte del
     video, nunca con una moraleja.
 
@@ -120,7 +127,8 @@ ESTRUCTURA (9 planos, ids p00 a p08)
 - p00 "gancho_hablado": MÁXIMO 12 PALABRAS. El dato que duele va PRIMERO. NINGÚN año ni fecha
   dichos (van en texto_en_pantalla o en p01). Que tenga una contradicción o algo sin explicar.
   Bien: "En Cancún pagas la gasolina más cara que en Monterrey. Y hay un acuerdo para que no pase."
-- p01 "hook_tercera_persona": "Te imaginas a quien [vive aquí y le pasa esto]…" (una sola vez).
+- p01 "hook_tercera_persona": presenta a alguien como quien ve (una sola vez; no se repite en p02).
+<<APERTURAS>>
 - DOS PREGUNTAS directas a quien ve, sobre SU caso (no se responden en el video: la piensa y la
   contesta en los comentarios). Una antes del segundo diez, en p01 o p02 ("¿A ti ya te
   cobraron eso?", "¿Sabes cuánto pagas tú?"), y otra a la mitad, en p03, p04 o p05 ("¿Tú
@@ -350,6 +358,25 @@ _AHORITA = {
 }
 
 
+# Hasta el 03/11/2026 el 75% de los guiones abría el p01 con "Te imaginas a quien…" (91
+# guiones medidos; auditoría en C:\clip_assistance\analisis\virales_y_huella_2026-11-03.md).
+# Se nota desde el perfil y cae justo en el segundo en que TikTok decide si reparte: quien
+# ya vio dos videos reconoce el molde y se va. La comparativa ya no lo usaba (Javier, p01 de
+# instruccion_comparativa); esto lo abre a seis aperturas en las otras tres fórmulas.
+APERTURAS_P01 = """  ROTA LA APERTURA: escoge la que mejor le quede al tema y NO repitas la del guion anterior
+  de esta tanda. La (a) se usó en tres de cada cuatro videos del canal, así que úsala solo si
+  ninguna otra le queda, no por costumbre. Todas le hablan de tú y ninguna pasa de 20 palabras.
+    a) "Te imaginas a quien [vive ahí y le pasa esto]…"
+    b) La condición de quien ve: "Si llevas años pagando el agua en [lugar]…", "Si tu hijo
+       toma ese camión…"
+    c) La escena, con hora y lugar, sin adjetivos: "Son las seis de la mañana en [lugar] y
+       ya hay fila en [x]."
+    d) La cifra vuelta persona: "Son [N] en [lugar]. Una de ellas [hizo esto]."
+    e) El objeto en su mano: "Saca tu recibo de [mes]. Busca el renglón de [x]."
+    f) Lo que alguien dijo, textual y atribuido: "«[la frase]». Se lo dijeron a quien [x]."
+"""
+
+
 def repartir_vigencias(n: int, conteo: dict[str, int] | None = None) -> list[tuple[str, int]]:
     """n guiones repartidos 3 de conversación : 2 perennes, compensando lo que ya hay
     (como `repartir` con los temas). 5 -> 3 + 2; 1 -> el que vaya atrás."""
@@ -368,7 +395,8 @@ def instruccion(clave: str, n: int, ya_hechos: str, ligera: bool = False,
 
     tema = next(t for t in TEMAS if t[0] == clave)
     desde = (hoy or date.today()) - timedelta(days=DIAS_NOTICIA)
-    texto = (INSTRUCCION.replace("<<AHORITA>>", _AHORITA[vigencia]).replace("<<DESDE>>", f"{desde:%d/%m/%Y}")
+    texto = (INSTRUCCION.replace("<<AHORITA>>", _AHORITA[vigencia]).replace("<<APERTURAS>>", APERTURAS_P01)
+             .replace("<<DESDE>>", f"{desde:%d/%m/%Y}")
              .replace("<<VIGENCIA>>", vigencia or "conversacion o perenne")
              .replace("<<N>>", str(n)).replace("<<TEMA>>", tema[1])
              .replace("<<DESCRIPCION>>", tema[2]).replace("<<CLAVE>>", tema[0]))

@@ -269,10 +269,11 @@ ESTRUCTURA (9 planos, ids p00 a p08) -- los niveles intercalados
   Mal: "Israel va a controlar el agua de Yucatán." (eso AFIRMA el rumor)
   Nombrar a quien está señalado NO es afirmar el rumor: lo que afirma es el verbo, no el
   nombre. "Dos millones vieron el video de X" es un hecho; "X lo hizo" es una afirmación.
-- p01 "hook_tercera_persona": "Te imaginas a quien…" + A QUIÉN LE TOCA (pieza 1) + QUÉ SE
+- p01 "hook_tercera_persona": la apertura + A QUIÉN LE TOCA (pieza 1) + QUÉ SE
   DICE QUE PASÓ, atribuido y COMPLETO (quién lo dice, dónde, de quién y qué exactamente), + la
-  primera PREGUNTA directa a quien ve, antes del segundo diez: "¿Tú lo viste?", "¿Qué
-  escuchaste tú?". Puede ser de tres frases. Es la prueba del que llega sin saber.
+  primera PREGUNTA directa a quien ve, antes del segundo diez, de SÍ O NO: "¿Tú lo viste?",
+  "¿A ti ya te llegó?". Puede ser de tres frases. Es la prueba del que llega sin saber.
+<<APERTURAS>>
 - p02 "contexto": POR QUÉ SE CREE (pieza 8). El antecedente verificable, atribuido. Aquí es
   donde el video se gana a quien llegó creyendo el rumor.
 - p03 "el_hecho": el nivel 2 CONTESTANDO al rumor, con la cifra más fuerte y su fuente. Va la
@@ -468,7 +469,8 @@ def instruccion(n: int, tema: str | None, ya_hechos: str, ligera: bool = False) 
                        "dice, desde cuándo y qué documentos hay debajo.")
     else:
         descripcion = BUSCAR_TENDENCIAS.replace("<<CUANTOS>>", str(n))
-    texto = INSTRUCCION.replace("<<N>>", str(n)).replace("<<TEMA>>", descripcion)
+    texto = (INSTRUCCION.replace("<<N>>", str(n)).replace("<<TEMA>>", descripcion)
+             .replace("<<APERTURAS>>", instruccion_cercania.APERTURAS_P01))
     if ligera:
         texto = texto.replace("\nAL TERMINAR responde",
                               instruccion_cercania.COMO_TRABAJAR + "\nAL TERMINAR responde")
