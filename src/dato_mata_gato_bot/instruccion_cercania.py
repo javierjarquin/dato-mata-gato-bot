@@ -63,6 +63,16 @@ guion tiene que tener LOS CUATRO; si le falta uno, busca otro tema:
      responsable que no cumplió, cobró de más, prometió y no hizo. El coraje sale de los HECHOS
      verificados, nunca de exagerarlos: no se inventan culpables, y un acusado sin sentencia se
      presenta como acusado.
+     VARÍA QUIÉN ES EL RESPONSABLE (03/11/2026). Hasta esa fecha el 86% de los videos tenía un
+     actor de gobierno y el canal se leía como de política local, lo que le achica el público.
+     El responsable NO tiene que ser gobierno: vale el patrón que se queda las propinas (la Ley
+     Federal del Trabajo, artículo 346, las declara parte del salario), la concesionaria, la
+     constructora, la cadena de tiendas, la inmobiliaria, el desarrollador, la empresa de
+     transporte, la aseguradora. Si el tema que traes ya tiene responsable de gobierno, está
+     bien; lo que no se vale es que TODOS lo tengan. En "_schema.condiciones.4_coraje" escribe
+     quién es y si es público o privado.
+     Y NADA ELECTORAL: ni partidos, ni candidatos, ni elecciones, ni quién ganó una votación.
+     No es nuestro nicho y es lo único político que las plataformas sí restringen.
   Y además: 5. SE PUEDE GRABAR O MOSTRAR: la colonia, el recibo, la calle, la gasolinera, la playa,
      el documento; algo real que cualquiera puede ir a ver.
   6. HACE HABLAR (obligatoria desde el 14/10/2026): un tema del que quien lo ve TIENE SU PROPIA

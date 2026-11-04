@@ -226,6 +226,9 @@ LAS PIEZAS (las nueve, y sin una no hay video)
      premisa contra la cifra, y ésa es la brecha de curiosidad.
   4. CORAJE: contra el estigma y contra quien lo fabricó, con firma y fecha. Nunca contra la
      persona que opinó, ni contra el grupo ofendido.
+     Y NADA ELECTORAL (03/11/2026): ni partidos, ni candidatos, ni elecciones, ni quién hizo
+     ganar a quién, aunque esté dando conversación. No es nuestro nicho y es lo único político
+     que las plataformas sí restringen. Si la polémica es electoral, escoge otra.
   5. SE PUEDE MOSTRAR: la publicación que lo dijo, la que contestó, y el documento del dato.
      Aquí la evidencia obligatoria es la de REDES, al revés que en la fórmula del rumor.
   6. HACE HABLAR: todo el mundo tiene una versión de esto, porque es una opinión. La pregunta

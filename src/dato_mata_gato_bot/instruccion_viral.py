@@ -98,6 +98,14 @@ LAS PIEZAS (las ocho, y sin una no hay video)
   4. CORAJE: contra la OPACIDAD y contra la omisión documentada, nunca contra un país, una
      religión, un pueblo ni contra quien preguntó. El coraje sale de un hecho: un documento
      que no se exhibió, un permiso que no se revisó, una respuesta que no llegó.
+     LA OPACIDAD TAMBIÉN ES PRIVADA (03/11/2026). Hasta esa fecha el 61% de los virales tenía
+     actor de gobierno y el canal se leía como de política local. El que esconde el papel
+     puede ser una empresa, una concesionaria, una constructora, una cadena, un patrón o una
+     plataforma: el contrato que no se publicó, el permiso que la empresa no enseñó, la
+     cláusula que nadie leyó. Que no TODOS los videos señalen a una autoridad.
+     Y NADA ELECTORAL: ni partidos, ni candidatos, ni elecciones, ni quién hizo ganar a quién,
+     aunque esté dando conversación en la plataforma. No es nuestro nicho y es lo único
+     político que las plataformas sí restringen. Si el tema viral es electoral, escoge otro.
   5. SE PUEDE MOSTRAR: el documento, el acta, el expediente, el lugar. En esta fórmula la
      evidencia es media pieza del video: sin documento en pantalla, no se graba.
   6. HACE HABLAR: en un tema viral esto sobra, pero la pregunta cambia de tipo. No es "¿a ti
