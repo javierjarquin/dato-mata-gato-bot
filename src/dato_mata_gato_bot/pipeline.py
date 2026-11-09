@@ -386,28 +386,43 @@ def motor_tts_listo() -> str:
 VOCES_CRIMEN = {
     "fish3": lambda: (os.getenv("VOICESTUDIO_VOICE_ID_CRIMEN") or "").strip(),
     "javier": lambda: (os.getenv("VOICESTUDIO_VOICE_ID_CRIMEN_JAVIER") or "").strip(),
+    # Prueba de voces de estilo viral (09/11/2026): tres voces DISEÑADAS en
+    # VoiceStudio desde una descripción (no son clon de nadie), enérgicas y
+    # conversacionales. Javier las oyó y quiere usarlas todas, una por video,
+    # junto con Fish 3, para medir cuál retiene más.
+    "viral_a": lambda: (os.getenv("VOICESTUDIO_VOICE_ID_VIRAL_A") or "").strip(),
+    "viral_b": lambda: (os.getenv("VOICESTUDIO_VOICE_ID_VIRAL_B") or "").strip(),
+    "viral_c": lambda: (os.getenv("VOICESTUDIO_VOICE_ID_VIRAL_C") or "").strip(),
 }
-NOMBRE_VOZ = {"fish3": "Fish 3", "javier": "Javier (voz nueva)"}
+NOMBRE_VOZ = {"fish3": "Fish 3", "javier": "Javier (voz nueva)",
+              "viral_a": "Viral A (hombre joven)", "viral_b": "Viral B (hombre adulto)",
+              "viral_c": "Viral C (mujer joven)"}
+
+
+def voces_activas() -> list[str]:
+    """Las voces con perfil configurado, en el orden en que se reparten."""
+    return [nombre for nombre, perfil in VOCES_CRIMEN.items() if perfil()]
 
 
 def voz_narrador(slug: str) -> str:
-    """'fish3' o 'javier' para un true crime.
+    """La voz de un true crime: una clave de VOCES_CRIMEN ('fish3', 'viral_a'...).
 
     Manda el campo `voz_narrador` del guion (lo escribe `lote_grande.repartir_voces`
-    para alternar una y una dentro del lote). Sin campo, se decide por el slug
+    para rotar las voces dentro del lote). Sin campo, se decide por el slug
     con un hash estable: el mismo video sale siempre con la misma voz, también
-    si se regenera.
+    si se regenera. Con una sola voz configurada, todo es Fish 3, como antes.
     """
-    if not VOCES_CRIMEN["javier"]():
+    activas = voces_activas()
+    if len(activas) < 2:
         return "fish3"
     guion = ANDROID_IN / slug / "guion.json"
     try:
         elegida = json.loads(guion.read_text(encoding="utf-8")).get("voz_narrador")
     except (OSError, ValueError):
         elegida = None
-    if elegida in VOCES_CRIMEN:
+    if elegida in activas:
         return elegida
-    return "javier" if zlib.crc32(slug.encode("utf-8")) % 2 else "fish3"
+    return activas[zlib.crc32(slug.encode("utf-8")) % len(activas)]
 
 
 def voz_de_true_crime(slug: str, avatar: bool = False) -> dict[str, str]:
@@ -1537,7 +1552,7 @@ def nombres_dudosos(slug: str) -> list[str]:
 
 def _notas(slug: str, aviso_evidencia: str, avatar: bool = False) -> str:
     notas = [aviso_evidencia] if aviso_evidencia else []
-    if voz_de_true_crime(slug, avatar) and VOCES_CRIMEN["javier"]():
+    if voz_de_true_crime(slug, avatar) and len(voces_activas()) > 1:
         # Prueba de voces: al publicar hay que saber cuál es cuál.
         notas.append(f"voz: {NOMBRE_VOZ[voz_narrador(slug)]}")
     dudosos = nombres_dudosos(slug)

@@ -91,21 +91,34 @@ def admite_avatar(slug: str, entrada: Path | None = None) -> bool:
     return len(guion.get("planos") or []) >= _MIN_PLANOS_PARA_AVATAR
 
 
+_TURNO_VOCES = "_turno_voces.json"
+
+
 def repartir_voces(plan: "Plan", entrada: Path | None = None) -> dict[str, str]:
-    """Prueba de voces (11/10/2026): alterna Fish 3 y la voz nueva de Javier,
-    una y una, entre los true crime SIN presentador del lote, y lo deja escrito
-    en el guion (`voz_narrador`) para que el pipeline lo respete.
+    """Prueba de voces: rota las voces configuradas (Fish 3 y, desde el
+    09/11/2026, las tres virales diseñadas), una por video, entre los true
+    crime SIN presentador, y lo deja escrito en el guion (`voz_narrador`) para
+    que el pipeline lo respete.
+
+    El turno se guarda en disco (`_turno_voces.json`): la fábrica reparte por
+    tandas de 2, y con un contador que empezara en cero cada tanda solo saldrían
+    las dos primeras voces.
 
     El que ya trae voz se respeta: un lote retomado no cambia la voz de lo que
-    ya salió. Sin el perfil de Javier configurado no se escribe nada.
+    ya salió. Con menos de dos voces configuradas no se escribe nada.
     """
     from dato_mata_gato_bot import pipeline
 
-    if not pipeline.VOCES_CRIMEN["javier"]():
+    activas = pipeline.voces_activas()
+    if len(activas) < 2:
         return {}
     base = entrada or pipeline.ANDROID_IN
+    archivo_turno = base / _TURNO_VOCES
+    try:
+        turno = int(json.loads(archivo_turno.read_text(encoding="utf-8"))["turno"])
+    except (OSError, ValueError, KeyError, TypeError):
+        turno = 0
     repartidas: dict[str, str] = {}
-    turno = 0
     for slug, avatar in plan.tareas:
         if avatar is not None or not slug.startswith("guion-"):
             continue
@@ -114,11 +127,12 @@ def repartir_voces(plan: "Plan", entrada: Path | None = None) -> dict[str, str]:
             guion = json.loads(ruta.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        if guion.get("voz_narrador") not in pipeline.VOCES_CRIMEN:
-            guion["voz_narrador"] = "fish3" if turno % 2 == 0 else "javier"
+        if guion.get("voz_narrador") not in activas:
+            guion["voz_narrador"] = activas[turno % len(activas)]
             ruta.write_text(json.dumps(guion, ensure_ascii=False, indent=2), encoding="utf-8")
+            turno += 1
         repartidas[slug] = guion["voz_narrador"]
-        turno += 1
+    archivo_turno.write_text(json.dumps({"turno": turno % len(activas)}), encoding="utf-8")
     return repartidas
 
 

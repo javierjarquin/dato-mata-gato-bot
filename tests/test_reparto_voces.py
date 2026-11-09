@@ -8,6 +8,8 @@ def _guiones(tmp_path, monkeypatch, slugs):
     monkeypatch.setattr(pipeline, "motor_tts", lambda: "voicestudio")
     monkeypatch.setenv("VOICESTUDIO_VOICE_ID_CRIMEN", "fish")
     monkeypatch.setenv("VOICESTUDIO_VOICE_ID_CRIMEN_JAVIER", "javi")
+    for letra in "ABC":  # las virales del .env no se cuelan en estas pruebas
+        monkeypatch.delenv(f"VOICESTUDIO_VOICE_ID_VIRAL_{letra}", raising=False)
     for s in slugs:
         (tmp_path / s).mkdir()
         (tmp_path / s / "guion.json").write_text(json.dumps({"planos": []}), encoding="utf-8")
@@ -50,6 +52,28 @@ def test_sin_perfil_de_javier_todo_es_fish3(tmp_path, monkeypatch):
     monkeypatch.delenv("VOICESTUDIO_VOICE_ID_CRIMEN_JAVIER")
     assert lote_grande.repartir_voces(_plan(tmp_path, [("guion-a", None), ("guion-b", None)])) == {}
     assert pipeline.voz_narrador("guion-b") == "fish3"
+
+
+def test_cuatro_voces_rotan_entre_tandas(tmp_path, monkeypatch):
+    # La fábrica reparte por tandas de 2: el turno sigue de una tanda a otra,
+    # si no, solo saldrían las dos primeras voces (09/11/2026).
+    slugs = [f"guion-{i}" for i in range(6)]
+    _guiones(tmp_path, monkeypatch, slugs)
+    monkeypatch.delenv("VOICESTUDIO_VOICE_ID_CRIMEN_JAVIER")
+    for letra in "ABC":
+        monkeypatch.setenv(f"VOICESTUDIO_VOICE_ID_VIRAL_{letra}", f"perfil{letra}")
+    for tanda in (slugs[0:2], slugs[2:4], slugs[4:6]):
+        lote_grande.repartir_voces(_plan(tmp_path, [(s, None) for s in tanda]))
+    voces = [pipeline.voz_narrador(s) for s in slugs]
+    assert voces == ["fish3", "viral_a", "viral_b", "viral_c", "fish3", "viral_a"]
+    assert pipeline.voz_de_true_crime("guion-3")["VOICESTUDIO_VOICE_ID"] == "perfilC"
+    # Un guion retomado conserva su voz y no gasta turno.
+    lote_grande.repartir_voces(_plan(tmp_path, [("guion-1", None)]))
+    assert pipeline.voz_narrador("guion-1") == "viral_a"
+    (tmp_path / "guion-6").mkdir()
+    (tmp_path / "guion-6" / "guion.json").write_text(json.dumps({"planos": []}), encoding="utf-8")
+    lote_grande.repartir_voces(_plan(tmp_path, [("guion-6", None)]))
+    assert pipeline.voz_narrador("guion-6") == "viral_b"
 
 
 def _staged(tmp_path, monkeypatch, slug):
