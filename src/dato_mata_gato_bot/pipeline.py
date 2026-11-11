@@ -1450,14 +1450,24 @@ def run(slug: str, voz: str, chat_id: int | None = None,
 
     aviso_render = ""
     if modo_render(slug, avatar) == "remotion":
-        progreso("render con Remotion")
-        ok_r, detalle_r = render_remotion(slug)
-        if ok_r:
-            aviso_render = ("render: Remotion + animaciones (" + detalle_r[len("plus: "):] + ")"
-                            if detalle_r.startswith("plus: ") else "render: Remotion")
-        else:
-            aviso_render = f"render: FFmpeg (Remotion falló: {detalle_r[-300:]})"
-        aviso_evidencia = "\n".join(x for x in (aviso_evidencia, aviso_render) if x)
+        from dato_mata_gato_bot import escenas_3d  # import tardío: escenas_3d usa pipeline
+
+        # Escenas 3D en vez del formato "noticia" (11/11/2026): cada plano se
+        # dibuja (escenario, personajes, cámara) en vez de enseñar la nota que
+        # baja. Si no salen, el video no se pierde: sigue el render de siempre.
+        falla_escenas = ""
+        ok_r, aviso_render = (escenas_3d.generar(slug, progreso) if escenas_3d.usa_escenas(slug)
+                              else (False, ""))
+        if not ok_r:
+            falla_escenas, aviso_render = aviso_render, ""
+            progreso("render con Remotion")
+            ok_r, detalle_r = render_remotion(slug)
+            if ok_r:
+                aviso_render = ("render: Remotion + animaciones (" + detalle_r[len("plus: "):] + ")"
+                                if detalle_r.startswith("plus: ") else "render: Remotion")
+            else:
+                aviso_render = f"render: FFmpeg (Remotion falló: {detalle_r[-300:]})"
+        aviso_evidencia = "\n".join(x for x in (aviso_evidencia, falla_escenas, aviso_render) if x)
     elif voz_de_true_crime(slug, avatar) and (os.getenv("RENDER_VIDEO") or "").strip():
         aviso_evidencia = "\n".join(x for x in (aviso_evidencia, "render: FFmpeg") if x)
 
