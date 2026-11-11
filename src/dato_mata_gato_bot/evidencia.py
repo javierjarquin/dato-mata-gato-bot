@@ -316,6 +316,46 @@ _JS_BUSCAR = """([claves, soloTitulos]) => {
 }"""
 
 
+# --- el portero en vez de la nota (11/11/2026) --------------------------------
+# En el piloto de escenas, multimedia/e3_nota.png de guion-cdmx-sindicato-metro-
+# linea-a salió siendo la página "Confirm you are human" de Sociedad Noticias:
+# una captura de un captcha presentada como la prueba del dato. Eso no se
+# publica. Se detecta antes de capturar y la pieza se descarta.
+_BLOQUEO = re.compile(
+    r"confirm you are human|verify you are (?:a )?human|are you a robot|just a moment|"
+    r"checking your browser|enable javascript and cookies|attention required|access denied|"
+    r"ddos protection|security check|verificando que (?:usted )?es humano|verifica que eres humano|"
+    r"un momento, por favor|acceso denegado|comprobaci[oó]n de seguridad|"
+    r"re?captcha|cloudflare|turnstile", re.IGNORECASE)
+_JS_PORTERO = """() => ({
+  titulo: document.title || '',
+  texto: ((document.body && document.body.innerText) || '').slice(0, 1500),
+  largo: ((document.body && document.body.innerText) || '').trim().length,
+  marcas: document.querySelectorAll('iframe[src*="recaptcha"], iframe[src*="hcaptcha"],'
+    + ' iframe[src*="turnstile"], #cf-wrapper, #challenge-form, #challenge-running,'
+    + ' [id*="captcha" i], [class*="captcha" i]').length,
+})"""
+# Una nota de verdad trae miles de letras; el portero trae cuatro líneas. Sin
+# este tope, una nota que HABLA de Cloudflare o de los captchas se descartaría.
+LARGO_DE_NOTA = 1800
+
+
+def pagina_bloqueada(pagina) -> str:
+    """"" si la página es la nota; si es un captcha o un muro anti-bot, por qué
+    no se puede usar."""
+    try:
+        d = pagina.evaluate(_JS_PORTERO)
+    except Exception:  # noqa: BLE001 -- si no se puede mirar, que siga el flujo normal
+        return ""
+    if int(d.get("largo") or 0) > LARGO_DE_NOTA:
+        return ""
+    if m := _BLOQUEO.search(f"{d.get('titulo', '')}\n{d.get('texto', '')}"):
+        return f"la página es un muro anti-bot, no la nota ({m.group(0).strip().lower()})"
+    if d.get("marcas"):
+        return "la página es un captcha, no la nota"
+    return ""
+
+
 def capturar_titular(paginas, pieza: dict, destino: Path, claves: list[str]) -> dict:
     """El titular (y lo que tiene justo debajo: fecha, autor), SOLO si habla
     del caso. La página entera trae anuncios y, a veces, fotos de las víctimas.
@@ -340,6 +380,8 @@ def capturar_titular(paginas, pieza: dict, destino: Path, claves: list[str]) -> 
         # (05/10/2026) una barra fija con el autor tapaba el titular de La
         # Palabra del Caribe, un anuncio de gobierno el de La Jornada, y uno de
         # apuestas se colaba debajo del de La Silla Rota.
+        if motivo := pagina_bloqueada(pagina):
+            raise ValueError(motivo)
         pagina.evaluate(_JS_LIMPIAR)
         es_documento = pieza.get("tipo") == "documento"
         hallado = pagina.evaluate(_JS_BUSCAR, [claves, True])

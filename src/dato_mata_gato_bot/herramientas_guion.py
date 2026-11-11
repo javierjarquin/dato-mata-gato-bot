@@ -9,6 +9,7 @@ mismo en UNA llamada cada uno, sin gastar tokens de Claude en el trabajo:
 
     python -m dato_mata_gato_bot.herramientas_guion fotos "consulta 1" "consulta 2" ...
     python -m dato_mata_gato_bot.herramientas_guion revisar <slug>
+    python -m dato_mata_gato_bot.herramientas_guion escenas <slug>   (11/11/2026)
 
 `revisar` junta las reglas que antes se descubrían tarde (al generar el video
 o en la ronda de corrección): la fórmula, el largo, la foto que no existe, la
@@ -417,6 +418,33 @@ def revisar(slug: str) -> str:
             "correr revisar:\n" + "\n".join(f"- {p}" for p in out))
 
 
+# --- escenas 3D (11/11/2026) --------------------------------------------------
+
+def revisar_escenas(slug: str) -> str:
+    """La revisión del escenas.json que escribió Claude: que cada objeto, prop,
+    modelo, animación y cámara exista, y que no falte ningún plano."""
+    from dato_mata_gato_bot import instruccion_escenas, pipeline
+
+    base = pipeline.ANDROID_IN / slug
+    try:
+        guion = json.loads((base / "guion.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return f"no se pudo leer {base / 'guion.json'}"
+    ruta = base / "escenas.json"
+    try:
+        plan = json.loads(ruta.read_text(encoding="utf-8"))
+    except OSError:
+        return f"todavía no existe {ruta}: escríbelo con Write"
+    except ValueError as exc:
+        return f"{ruta} no es JSON válido: {exc}"
+    out = instruccion_escenas.problemas(plan, guion)
+    if not out:
+        return ("OK: " + instruccion_escenas.resumen_visual(plan)
+                + "\nYa está. Responde el bloque JSON del final y no hagas nada más.")
+    return ("Corrige TODO esto de una vez, con Edit y todos los Edit en la MISMA respuesta, y vuelve a "
+            "correr la revisión:\n" + "\n".join(f"- {p}" for p in out))
+
+
 def main(argv: list[str]) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -425,6 +453,9 @@ def main(argv: list[str]) -> int:
         return 0
     if len(argv) == 2 and argv[0] == "revisar":
         print(revisar(argv[1]))
+        return 0
+    if len(argv) == 2 and argv[0] == "escenas":
+        print(revisar_escenas(argv[1]))
         return 0
     print(__doc__)
     return 2
