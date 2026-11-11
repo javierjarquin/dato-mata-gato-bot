@@ -188,6 +188,13 @@ def test_limpiar_deja_una_escena_dibujable_aunque_todo_estuviera_mal():
     assert "camara" not in limpio["escenas"]["p00"]
 
 
+def test_limpiar_aguanta_un_archivo_con_otra_forma():
+    """Claude podría escribir una lista en vez de un diccionario: eso no puede
+    reventar el paso, nada más deja al video sin escenas."""
+    limpio, tirado = instruccion_escenas.limpiar({"escenas": [{"visual": []}]}, GUION)
+    assert limpio["escenas"] == {} and tirado
+
+
 def test_limpiar_tira_una_escena_que_no_es_de_ningun_plano():
     plan = _plan()
     plan["escenas"]["p99"] = {"visual": [{"objeto": "Suelo"}]}

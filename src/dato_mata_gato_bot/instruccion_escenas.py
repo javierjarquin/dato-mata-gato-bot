@@ -499,7 +499,10 @@ def limpiar(plan: dict, guion: dict) -> tuple[dict, list[str]]:
     planos = {p.get("id") for p in guion.get("planos") or []}
     evidencias = {str(e.get("id")) for e in guion.get("evidencia") or [] if str(e.get("id", "")).startswith("e")}
     limpio = {"ambiente": plan.get("ambiente") if plan.get("ambiente") in AMBIENTES else "noche", "escenas": {}}
-    for eid, e in (plan.get("escenas") or {}).items():
+    escenas = plan.get("escenas")
+    if not isinstance(escenas, dict):
+        return limpio, [f'"escenas" tiene que ser {{"<id del plano>": {{...}}}}, no {type(escenas).__name__}']
+    for eid, e in escenas.items():
         if eid not in planos or not isinstance(e, dict):
             tirado.append(f"{eid}: no es un plano del guion")
             continue
