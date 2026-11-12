@@ -57,7 +57,12 @@ def carpeta_de_sesiones(cwd: str = CWD):
 
 
 def run_turn(session_id: str, message: str, is_new_session: bool, ligera: bool = False,
-             recortada: bool = False) -> ClaudeTurnResult:
+             recortada: bool = False, herramientas: str | None = None,
+             sistema: str | None = None) -> ClaudeTurnResult:
+    """`herramientas` cambia las de la sesión ligera ("" = ninguna) y `sistema`
+    su system prompt: para un paso que solo contesta JSON (las escenas 3D,
+    12/11/2026) el de Claude Code y sus herramientas son ~8k tokens por turno
+    que no se usan."""
     # El prompt va por STDIN, no como argumento (16/10/2026). Windows corta la
     # línea de comandos en 32 767 caracteres y CreateProcess falla con
     # "WinError 206: el nombre del archivo o la extensión es demasiado largo".
@@ -74,7 +79,9 @@ def run_turn(session_id: str, message: str, is_new_session: bool, ligera: bool =
     for d in ADD_DIRS:
         args += ["--add-dir", d]
     if ligera:
-        args += ["--tools", HERRAMIENTAS_LIGERAS, "--strict-mcp-config"]
+        args += ["--tools", HERRAMIENTAS_LIGERAS if herramientas is None else herramientas, "--strict-mcp-config"]
+        if sistema:
+            args += ["--system-prompt", sistema]
         if EFFORT_ESCRITURA:
             args += ["--effort", EFFORT_ESCRITURA]
         if MODELO_ESCRITURA:

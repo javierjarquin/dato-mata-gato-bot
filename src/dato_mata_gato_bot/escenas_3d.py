@@ -14,6 +14,8 @@ Se apaga de dos formas:
 - "plus": {"sin_escenas": true} en un guion: ese video, nada más.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import os
@@ -31,11 +33,104 @@ TIMEOUT_RENDER = 30 * 60
 # Cuántas veces se le pide a Claude que corrija lo que la revisión marcó. Dos:
 # con tradiciones, lo que no se arregla en la segunda no se arregla en la quinta.
 INTENTOS = 2
+# Lo mismo con la IA gratis: cada intento es una llamada suelta, sin costo de Claude.
+INTENTOS_GRATIS = 3
+# Si tras limpiar lo inventado queda menos de esto con escena de verdad, no
+# sirve: se le piden a Claude.
+MINIMO_UTIL = 0.8
 
 
 def activas() -> bool:
     """ESCENAS_3D (default 1): 0 deja el canal con el render plus de antes."""
     return (os.getenv("ESCENAS_3D") or "1").strip() != "0"
+
+
+MOTORES = ("claude", "gratis", "claude_herramientas")
+
+
+def motor() -> str:
+    """Quién escribe las escenas (ESCENAS_MOTOR, 12/11/2026):
+    - "claude" (default): Claude contesta el JSON directo, sin herramientas ni el
+      system prompt de Claude Code; la revisión la corre este código.
+    - "gratis": Gemini y sus respaldos, y Claude si no sirven. Pasan la revisión
+      pero se ven más pobres (analisis/escenas_gratis en clip_assistance).
+    - "claude_herramientas": lo del 11/11, Claude escribe el archivo y corre la
+      revisión él mismo (~100k tokens por video)."""
+    valor = (os.getenv("ESCENAS_MOTOR") or "claude").strip().lower()
+    return valor if valor in MOTORES else "claude"
+
+
+SISTEMA_JSON = ("Eres el director de arte de un canal de videos cortos en español. Contestas SOLO con el "
+                "objeto JSON que se te pide, completo, sin texto antes ni después y sin ```.")
+
+
+def _json_de(texto: str):
+    """El objeto JSON de una respuesta, aunque venga con ``` o una línea de más."""
+    texto = (texto or "").strip()
+    try:
+        return json.loads(texto)
+    except ValueError:
+        pass
+    inicio, fin = texto.find("{"), texto.rfind("}")
+    if inicio < 0 or fin <= inicio:
+        return None
+    try:
+        return json.loads(texto[inicio:fin + 1])
+    except ValueError:
+        return None
+
+
+def _cerrar(slug: str, guion: dict, plan: dict, problemas: list[str], quien: str, tokens: dict,
+            sesion: str = "") -> Escenas | None:
+    """Lo común al terminar: limpia lo que quedó mal, descarta si ya no sirve
+    (None) y deja escenas.json."""
+    from dato_mata_gato_bot import instruccion_escenas
+
+    tirado: list[str] = []
+    if problemas:
+        plan, tirado = instruccion_escenas.limpiar(plan, guion)
+    if instruccion_escenas.escenas_utiles(plan, guion) < MINIMO_UTIL:
+        logger.warning("escenas de %s por %s: inservibles (%s)", slug, quien, "; ".join(problemas[:10]))
+        return None
+    ruta_plan(slug).write_text(json.dumps(plan, ensure_ascii=False, indent=1), encoding="utf-8")
+    detalle = f"{instruccion_escenas.resumen_visual(plan)} · {quien}"
+    if tirado:
+        logger.warning("escenas de %s con %d descartes: %s", slug, len(tirado), "; ".join(tirado[:20]))
+        detalle += f" · se descartaron {len(tirado)}: {'; '.join(tirado[:6])}"
+    return Escenas(True, detalle, tokens, sesion)
+
+
+def pedir_claude_json(slug: str, guion: dict, progreso=None) -> Escenas:
+    """Claude sin herramientas: contesta el JSON y aquí se revisa. Las
+    correcciones van en la misma sesión, solo con la lista de lo que falló."""
+    from dato_mata_gato_bot import claude_runner, fabrica, instruccion_escenas
+
+    sesion = str(uuid.uuid4())
+    mensaje = instruccion_escenas.instruccion_json(slug, guion)
+    plan, problemas, tokens = None, [], {}
+    for intento in range(INTENTOS + 1):
+        if progreso and intento:
+            progreso(f"escenas 3D: corrigiendo ({intento}/{INTENTOS})")
+        r = claude_runner.run_turn(sesion, mensaje, is_new_session=(intento == 0), ligera=True,
+                                   herramientas="", sistema=SISTEMA_JSON)
+        tokens = fabrica.tokens_de_sesiones([sesion])
+        if not r.ok:
+            # Sin cuota no sirve insistir: el video sale con el render de antes.
+            return Escenas(False, r.text[:400], tokens, sesion)
+        respuesta = _json_de(r.text)
+        if isinstance(respuesta, dict):
+            plan = respuesta
+            problemas = instruccion_escenas.problemas(plan, guion)
+        else:
+            problemas = ['tu respuesta no fue UN objeto JSON {"ambiente": ..., "escenas": {...}}']
+        if not problemas:
+            break
+        mensaje = ("La revisión de las escenas marcó esto. Corrígelo TODO y responde otra vez el JSON "
+                   "COMPLETO (todas las escenas, no solo las corregidas):\n" + "\n".join(f"- {p}" for p in problemas))
+    if plan is None:
+        return Escenas(False, "; ".join(problemas)[:400], tokens, sesion)
+    hechas = _cerrar(slug, guion, plan, problemas, "Claude sin herramientas", tokens, sesion)
+    return hechas or Escenas(False, "no quedó ninguna escena utilizable", tokens, sesion)
 
 
 def usa_escenas(slug: str) -> bool:
@@ -74,7 +169,59 @@ def _leer(ruta: Path) -> dict | None:
     return plan if isinstance(plan, dict) else None
 
 
+def pedir_gratis(slug: str, guion: dict, progreso=None) -> Escenas | None:
+    """Las escenas con la IA gratis (ia_gratis.pedir), revisadas con el mismo
+    código que las de Claude. None = no contestó nadie o salió inservible, y
+    quien llama se las pide a Claude."""
+    from dato_mata_gato_bot import ia_gratis, instruccion_escenas
+
+    base =instruccion_escenas.instruccion_json(slug, guion)
+    prompt, plan, problemas = base, None, []
+    ia_gratis.reiniciar_usados()
+    for intento in range(INTENTOS_GRATIS + 1):
+        if progreso and intento:
+            progreso(f"escenas 3D (IA gratis): corrigiendo ({intento}/{INTENTOS_GRATIS})")
+        try:
+            # Sin Ollama: el modelo local de 7b no da para un prompt así.
+            respuesta = ia_gratis.pedir(prompt, local=False)
+        except ia_gratis.SinIA as exc:
+            logger.warning("escenas de %s: la IA gratis no contestó (%s)", slug, str(exc)[:300])
+            break
+        if isinstance(respuesta, dict):
+            plan = respuesta
+            problemas = instruccion_escenas.problemas(plan, guion)
+        else:
+            problemas = ['la respuesta tiene que ser UN objeto JSON {"ambiente": ..., "escenas": {...}}']
+        if not problemas:
+            break
+        prompt = instruccion_escenas.correccion_json(base, plan if plan is not None else respuesta, problemas)
+
+    if plan is None:
+        return None
+    return _cerrar(slug, guion, plan, problemas, f"sin Claude ({', '.join(sorted(ia_gratis.usados())) or 'IA gratis'})", {})
+
+
 def pedir(slug: str, progreso=None) -> Escenas:
+    """Las escenas del video con el motor de ESCENAS_MOTOR (ver motor())."""
+    from dato_mata_gato_bot import pipeline
+
+    elegido = motor()
+    if elegido == "claude_herramientas":
+        return pedir_claude(slug, progreso)
+    try:
+        guion = json.loads((pipeline.ANDROID_IN / slug / "guion.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return Escenas(False, f"no se pudo leer el guion: {exc}")
+    ruta_plan(slug).unlink(missing_ok=True)  # que no se cuele el de una corrida anterior
+    if elegido == "gratis":
+        if (hechas := pedir_gratis(slug, guion, progreso)) is not None:
+            return hechas
+        if progreso:
+            progreso("escenas 3D: la IA gratis no sirvió, se las pido a Claude")
+    return pedir_claude_json(slug, guion, progreso)
+
+
+def pedir_claude(slug: str, progreso=None) -> Escenas:
     """Le pide a Claude las escenas del video y deja escenas.json listo.
 
     Claude escribe el archivo y corre él mismo la revisión; aquí se vuelve a
@@ -171,7 +318,7 @@ def generar(slug: str, progreso=None) -> tuple[bool, str]:
     from dato_mata_gato_bot import pipeline
 
     if progreso:
-        progreso("escenas 3D: pidiéndoselas a Claude")
+        progreso("escenas 3D: pidiéndoselas a " + ("la IA gratis" if motor() == "gratis" else "Claude"))
     hechas = pedir(slug, progreso)
     gasto = hechas.tokens.get("total", 0)
     costo = f" · {gasto / 1000:.0f}k tokens" if gasto else ""
