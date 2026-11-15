@@ -17,9 +17,10 @@ Javier, 17/10/2026: "es una opinión lo que generó la polémica, entonces no ha
 una fuente de la verdad, más bien la causa y la respuesta de los afectados o la
 opinión pública tiene más sentido". De ahí sale esta fórmula.
 
-LA PRUEBA PARA ELEGIR FÓRMULA, EN UNA LÍNEA: ¿existe un papel que, si
-apareciera, cerraría la discusión? Sí -> `instruccion_viral` (tres niveles).
-No -> ésta.
+LA PRUEBA PARA ELEGIR FÓRMULA, EN UNA LÍNEA (06/11/2026; antes era "¿existe un
+papel que cerraría la discusión?"): ¿lo que detonó todo es un HECHO o una
+OPINIÓN? Hecho -> `instruccion_viral` (tres niveles), aunque ningún papel lo
+cierre. Opinión -> ésta.
 
 Lo que SÍ se verifica aquí, porque una opinión no se puede verificar:
   - que la frase se dijo (la cita, no el juicio): textual, con quién y dónde;
@@ -82,11 +83,13 @@ DE QUÉ VA ESTA FÓRMULA, Y EN QUÉ SE DIFERENCIA DE LA DEL RUMOR
 Esta fórmula es para los temas virales donde lo que detonó todo es una OPINIÓN, no una versión
 de los hechos. Y una opinión no se puede verificar: no hay documento que diga si un insulto fue
 justo. La prueba para saber si un tema es de esta fórmula o de la otra es una sola pregunta:
-  ¿EXISTE UN PAPEL QUE, SI APARECIERA, CERRARÍA LA DISCUSIÓN?
-  Sí  -> no es esta fórmula. Es la de los tres niveles (lo que se dice / lo que está en papel /
-         lo que nadie ha contestado), y ahí el motor es la duda.
-  No  -> es ésta. El motor es el AGRAVIO Y LA RESPUESTA.
-Escríbelo en "_schema.por_que_esta_formula", en una línea, y di qué papel NO existe.
+  ¿LO QUE DETONÓ TODO ES UN HECHO O UNA OPINIÓN?
+  Un HECHO (algo que pasó o que se dice que pasó) -> no es esta fórmula. Es la de los tres
+         niveles (lo que se dice / lo que está verificado / lo que nadie ha contestado), y ahí
+         el motor es la duda, aunque ningún papel cierre la discusión.
+  Una OPINIÓN (una frase, un insulto, una burla, un juicio sobre un grupo) -> es ésta. El
+         motor es el AGRAVIO Y LA RESPUESTA.
+Escríbelo en "_schema.por_que_esta_formula", en una línea: cuál es la opinión que lo detonó.
 
 Los niveles de esta fórmula:
   NIVEL 1 · LA CAUSA     la opinión que lo detonó, textual y atribuida. Lo único que el canal
@@ -395,7 +398,7 @@ FORMATO DE CADA GUION
 Escríbelo en C:\Android_in\<slug>\guion.json, con slug "guion-polemica-" + palabras cortas del
 tema (minúsculas y guiones). Además de lo de siempre ("titulo", "gancho", "claves", "hashtags",
 "evidencia", "planos"), el "_schema" lleva:
-  "por_que_esta_formula": "qué papel NO existe que cerraría la discusión",
+  "por_que_esta_formula": "cuál es la OPINIÓN que lo detonó (no un hecho)",
   "frase": {"texto": "la cita textual", "quien": "...", "donde": "plataforma o programa",
             "cuando": "DD/MM/AAAA"},
   "premisas": [{"dice": "...", "fuente_del_rumor": "clave", "dato": "...",
@@ -458,9 +461,9 @@ buscas es una publicación con MUCHAS respuestas de gente aludida, que es la fir
 polémica. La prensa entra DESPUÉS, para citar y para el dato. Nunca para descubrir el tema.
 Escribe en "_schema.hallado_en" la plataforma, la cuenta y los números.
 
-LA PRUEBA DEL PAPEL, antes que nada: ¿existe un documento que, si apareciera, cerraría la
-discusión? Si SÍ, el tema no es de esta fórmula: es de la de los tres niveles, y ahí el canal
-busca el papel. Esta fórmula es solo para cuando lo que detonó todo es una OPINIÓN. Un tema así
+¿HECHO U OPINIÓN?, antes que nada: si lo que detonó todo es un HECHO (algo que pasó o que se
+dice que pasó), el tema no es de esta fórmula: es de la de los tres niveles. Esta fórmula es
+solo para cuando lo que detonó todo es una OPINIÓN. Un tema de hechos
 NO se tira (27/10/2026): anótalo en tu respuesta como "PARA VIRAL: <tema>" y la fábrica lo
 pasa a esa fórmula.
 
@@ -474,7 +477,7 @@ escríbelas en "_schema.impacto" con su número y su fecha:
   - gente contando su propio caso en los comentarios (es la mejor señal de todas).
 
 Una polémica sirve para esta fórmula solo si cumple LAS CUATRO:
-  a) lo que detonó es una OPINIÓN, no una versión de los hechos (la prueba del papel);
+  a) lo que detonó es una OPINIÓN, no una versión de los hechos (¿hecho u opinión?);
   b) el ofendido es un COLECTIVO grande, no una persona: si es una persona, es chisme y no va;
   c) hay una CIFRA de fuente primaria que desarma la premisa, y pasa la prueba del ofensor;
   d) hay dos publicaciones que se pueden enseñar: la causa y la respuesta.
@@ -522,8 +525,8 @@ CONDICIONES = ("1_te_afecta", "2_esta_pasando_ahorita", "3_algo_no_cuadra", "4_c
 CAMPOS = {
     "que_paso": "qué pasó, en una frase para quien no vio la polémica: quién (con su rol), a "
                 "quién, dónde y la frase COMPLETA. La narración de p00 a p02 tiene que decirlo",
-    "por_que_esta_formula": "qué papel NO existe que cerraría la discusión. Si existe, el tema "
-                            "es de la fórmula de los tres niveles, no de ésta",
+    "por_que_esta_formula": "cuál es la OPINIÓN que lo detonó. Si lo que lo detonó es un hecho, "
+                            "el tema es de la fórmula de los tres niveles, no de ésta",
     "estigma": "el prejuicio en una línea, con las palabras con las que se dice",
     "prueba_del_ofensor": "por qué tus datos no se pueden voltear en tu contra. Léelos en voz "
                           "de quien insultó: si le sirven, no son tus datos",

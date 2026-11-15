@@ -59,11 +59,18 @@ FORMULAS = {
     # muerte de un cantante, y Claude tiró el expediente y buscó 17 veces. Estas
     # consultas son las que a Claude sí le dieron tema ("funan a influencer
     # tras burlarse de…").
+    # 06/11/2026: también lo de otro país que es viral en español (la guerra, el
+    # robo de banco en Paraguay); por eso dos consultas van sin "México".
     "viral": (["se hizo viral México", "rumor redes sociales México", "es falso que circula en redes",
-               "desmienten video viral", "aseguran en redes que"],
-              "algo que ya se está diciendo en redes y que tiene un documento oficial debajo que "
-              "lo confirmaría o lo tumbaría (lo que se dice / lo que está en papel / lo que nadie ha "
-              "contestado). Una muerte SÍ sirve si circula una versión que un papel oficial cerraría ('dicen que se suicidó' contra el dictamen de la fiscalía). NO sirven: deportes, espectáculos sin rumor, nombramientos"),
+               "desmienten video viral", "aseguran en redes que", "video viral internacional",
+               "impactante video viral mundo"],
+              "un HECHO del que ya se está hablando en redes -algo que pasó o que se dice que pasó-, "
+              "con algo verificable debajo aunque la discusión siga abierta (lo que se dice / lo que "
+              "está verificado / lo que nadie ha contestado). No tiene que ir contra una autoridad. "
+              "Una muerte SÍ sirve si circula una versión sobre ella ('dicen que se quitó la vida'). "
+              "Puede ser de OTRO PAÍS si en redes en español se está hablando de eso (un robo de banco "
+              "en Paraguay, un hecho concreto de una guerra), sin ángulo mexicano. "
+              "NO sirven: deportes, espectáculos sin rumor, nombramientos"),
     "polemica": (["funan a influencer México", "se disculpa tras comentario México", "indignación por comentario México",
                   "comentario clasista OR racista OR machista México", "madres buscadoras OR trabajadores ofende México"],
                  "una FRASE dicha por alguien con nombre (influencer, político, empresario, famoso) que "
@@ -79,6 +86,16 @@ FORMULAS = {
                     "anterior o que otro estado, y existe UN indicador medido igual en los dos lados (INEGI, "
                     "CONEVAL, SESNSP, IMCO, CONAGUA). NO sirven: chismes de políticos, encuestas de "
                     "popularidad, comparaciones sin dato"),
+    # 06/11/2026, prueba de un mes con todos los formatos: el cobro o el derecho
+    # que casi nadie conoce. Perenne: busca 30 días, como la comparativa.
+    "notedicen": (["PROFECO alerta consumidores cobro", "CONDUSEF comisiones bancarias usuarios",
+                   "derechos del consumidor México no sabías", "cobro indebido reclamar PROFECO",
+                   "derechos laborales aguinaldo vacaciones Ley Federal del Trabajo"],
+                  "un cobro, una regla, un derecho o una letra chiquita que le toca a casi cualquiera "
+                  "en México y que casi nadie conoce, con la regla escrita (ley y artículo, NOM, la "
+                  "autoridad que la vigila) y algo que quien ve puede hacer (reclamar, pedir, negarse). "
+                  "NO sirven: consejos de inversión, trucos sin regla, temas de salud, ni lo que cambia "
+                  "de un contrato a otro sin regla general"),
 }
 
 # El dato oficial que cada fórmula pide y Claude salía a buscar (auditoría del
@@ -89,7 +106,9 @@ OFICIAL = {
     "polemica": ("la cifra oficial del grupo del que se habla: cuántos son o cuántos viven esto, con año",
                  "INEGI cifra oficial"),
     "viral": ("qué dice el documento oficial (decreto, dictamen, comunicado, padrón) sobre esto",
-              "documento oficial gob.mx"),
+              "comunicado oficial gobierno OR fiscalía OR policía"),
+    "notedicen": ("qué dice la regla (ley y artículo, NOM o disposición) y qué hay que hacer para "
+                  "reclamarlo: dónde, requisitos y plazo", "ley artículo PROFECO OR CONDUSEF gob.mx"),
     "cancun": ("el dato oficial sobre esto: cifra, fecha y dependencia", "datos oficiales gob.mx"),
     "cdmx": ("el dato oficial sobre esto: cifra, fecha y dependencia", "datos oficiales gob.mx"),
 }
@@ -97,9 +116,13 @@ OFICIALES = ("inegi.org.mx", "coneval.org.mx", "imco.org.mx", "mexicoevalua.org"
              "ine.mx", "cndh.org.mx", "inai.org.mx")
 
 
-def es_oficial(liga: str) -> bool:
+def es_oficial(liga: str, mundo: bool = False) -> bool:
+    """INEGI, gob.mx y compañía. Con `mundo` (viral, 06/11/2026) también el
+    gobierno de otro país: gov.py, gob.ar, .gov, gouv.fr…"""
     casa = urlparse(liga).netloc.lower().removeprefix("www.")
-    return casa.endswith(".gob.mx") or casa == "gob.mx" or any(casa == o or casa.endswith("." + o) for o in OFICIALES)
+    if casa.endswith(".gob.mx") or casa == "gob.mx" or any(casa == o or casa.endswith("." + o) for o in OFICIALES):
+        return True
+    return mundo and any(e in {"gob", "gov", "gouv", "gub", "mil"} for e in casa.split(".")[1:])
 
 
 class SinTemasFrescos(RuntimeError):
@@ -289,9 +312,16 @@ HERMANAS = {"polemica": "viral", "viral": "polemica"}
 def escoger(lista: list[dict], que_buscar: str, cuantos: int, ya_hechos: str,
             formula: str | None = None, desde: datetime | None = None) -> list[dict]:
     """Los mejores `cuantos`. Con una fórmula hermana, cada elegido trae
-    "formula": la suya o la otra, por la prueba del papel. Con `desde`, el
+    "formula": la suya o la otra, por hecho u opinión. Con `desde`, el
     HECHO (no la nota) tiene que ser de esa fecha o más nuevo."""
     clasificar = fresco = pide_desde = ""
+    # 06/11/2026: lo viral puede ser de otro país si se habla de eso en español.
+    donde = ("Tiene que pasar en México o tocar a México directamente (nada de otro país que aquí no "
+             "importe)")
+    if formula == "viral" or formula in HERMANAS:
+        donde = ("Un tema VIRAL puede ser de CUALQUIER PAÍS si en redes en español se está hablando de "
+                 "eso (un robo de banco en Paraguay, un hecho concreto de una guerra); todo lo demás "
+                 f"{donde[0].lower() + donde[1:]}")
     if desde:
         fresco = (f" El HECHO tiene que haber empezado el {desde:%d/%m/%Y} o después (cuándo se dijo, se "
                   "publicó o se viralizó): una nota reciente que da seguimiento a algo más viejo NO sirve.")
@@ -300,16 +330,17 @@ def escoger(lista: list[dict], que_buscar: str, cuantos: int, ya_hechos: str,
         otra = HERMANAS[formula]
         que_buscar = (f"temas para dos fórmulas hermanas. POLÉMICA: {FORMULAS['polemica'][1]}. "
                       f"VIRAL: {FORMULAS['viral'][1]}. Prefiero de {formula}")
-        clasificar = (f', "formula": "{formula}" o "{otra}" (la prueba del papel: si existe un documento '
-                      'que, si apareciera, cerraría la discusión, es "viral"; si lo que detonó todo es '
-                      'una opinión sin papel que la cierre, es "polemica")')
+        # 06/11/2026: sin "prueba del papel". La discusión de un viral puede
+        # quedar abierta; lo que lo separa de la polémica es hecho u opinión.
+        clasificar = (f', "formula": "{formula}" o "{otra}" (si lo que detonó todo es un HECHO -algo que '
+                      'pasó o que se dice que pasó-, es "viral", aunque ningún documento lo cierre; si es '
+                      'una OPINIÓN -una frase, un insulto, una burla contra un grupo-, es "polemica")')
     renglones = "\n".join(f"{i}. {n['titulo']} — {n['medio']}"
                           + (f" ({n['fecha']:%d/%m})" if desde and hasattr(n.get("fecha"), "strftime") else "")
                           + (f" [{n['tendencia']}]" if n.get("tendencia") else "") for i, n in enumerate(lista))
     r = ia_gratis.pedir(
         f"Eres editor de un canal de TikTok en español de México. Hoy es {datetime.now():%d/%m/%Y}. Busco {cuantos} temas para "
-        f"videos cortos para gente de México. Qué busco: {que_buscar}. Tiene que pasar en México "
-        "o tocar a México directamente (nada de otro país que aquí no importe), estar pasando ahorita, hacer hablar "
+        f"videos cortos para gente de México. Qué busco: {que_buscar}. {donde}. Tiene que estar pasando ahorita, hacer hablar "
         f"(que la gente quiera comentar) y poderse mostrar con notas o documentos.{fresco}\n"
         "No repitas nada de lo que ya está hecho, ni el mismo caso con otras palabras:\n"
         f"{ya_hechos[:6000]}\n\nTitulares:\n{renglones}\n\n"
@@ -576,7 +607,7 @@ def _oficial(t: dict, formula: str) -> None:
     """Hasta 2 páginas oficiales (INEGI, CONEVAL, gob.mx…) con el dato que pide
     la fórmula, y sus datos con cita. Sin página oficial, no agrega nada."""
     pregunta, extra = OFICIAL[formula]
-    ligas = [r for r in web(f"{consulta_de(t)} {extra}") if es_oficial(r["liga"])][:2]
+    ligas = [r for r in web(f"{consulta_de(t)} {extra}") if es_oficial(r["liga"], mundo=formula == "viral")][:2]
     textos = [leer(r["liga"], tope=None) for r in ligas]
     notas = [{**r, "texto": lo_que_toca(x, f"{t['titulo']} {pregunta}")} for r, x in zip(ligas, textos) if x]
     if not notas:

@@ -250,6 +250,151 @@ def test_tradiciones_no_pasa_por_aqui(tmp_path, monkeypatch):
     assert escenas_3d.usa_escenas("guion-x") is False
 
 
+# --- las escenas con la IA gratis (12/11/2026) -----------------------------------
+
+class _IA:
+    """ia_gratis.pedir de mentira: contesta lo que se le da, en orden."""
+
+    def __init__(self, *respuestas):
+        self.respuestas = list(respuestas)
+        self.prompts: list[str] = []
+
+    def __call__(self, prompt, **_):
+        from dato_mata_gato_bot import ia_gratis
+
+        self.prompts.append(prompt)
+        r = self.respuestas.pop(0)
+        if isinstance(r, Exception):
+            raise r
+        ia_gratis._USADOS.add("gemini-de-prueba")
+        return r
+
+
+@pytest.fixture
+def con_ia(tmp_path, monkeypatch):
+    from dato_mata_gato_bot import ia_gratis
+
+    _guion_en_disco(tmp_path, monkeypatch, GUION)
+    monkeypatch.setenv("ESCENAS_MOTOR", "gratis")
+    llamadas_claude = []
+    monkeypatch.setattr(escenas_3d, "pedir_claude_json", lambda slug, guion, progreso=None:
+                        llamadas_claude.append(slug) or escenas_3d.Escenas(True, "claude"))
+    monkeypatch.setattr(escenas_3d, "pedir_claude", lambda slug, progreso=None:
+                        llamadas_claude.append("herramientas") or escenas_3d.Escenas(True, "herramientas"))
+
+    def poner(*respuestas):
+        ia = _IA(*respuestas)
+        monkeypatch.setattr(ia_gratis, "pedir", ia)
+        return ia, llamadas_claude
+    return poner
+
+
+def test_la_instruccion_gratis_pide_el_json_y_no_herramientas():
+    texto = instruccion_escenas.instruccion_json("guion-x", GUION)
+    assert "CÓMO RESPONDER" in texto and "CÓMO TRABAJAR" not in texto
+    assert "escenas.json" not in texto and "herramientas_guion" not in texto
+    assert "CATÁLOGO" in texto and "p00" in texto
+
+
+def test_gratis_a_la_primera_no_toca_claude(con_ia, tmp_path):
+    ia, claude = con_ia(_plan())
+    hechas = escenas_3d.pedir("guion-x")
+    assert hechas.ok and "sin Claude (gemini-de-prueba)" in hechas.detalle
+    assert claude == [] and len(ia.prompts) == 1
+    assert json.loads((tmp_path / "guion-x" / "escenas.json").read_text(encoding="utf-8")) == _plan()
+
+
+def test_gratis_corrige_con_la_lista_de_la_revision(con_ia):
+    malo = _plan(p00={"visual": [{"objeto": "Suelo"}, {"objeto": "Helicoptero"}]})
+    ia, claude = con_ia(malo, _plan())
+    assert escenas_3d.pedir("guion-x").ok
+    assert len(ia.prompts) == 2 and "Helicoptero" in ia.prompts[1] and "TU RESPUESTA ANTERIOR" in ia.prompts[1]
+    assert claude == []
+
+
+def test_si_la_ia_gratis_no_contesta_van_con_claude(con_ia):
+    from dato_mata_gato_bot import ia_gratis
+
+    _, claude = con_ia(ia_gratis.SinIA("Gemini: 429"))
+    assert escenas_3d.pedir("guion-x").detalle == "claude"
+    assert claude == ["guion-x"]
+
+
+def test_si_queda_inservible_van_con_claude(con_ia):
+    """Escenas que tras el descarte se quedan en puro Suelo no son un video."""
+    inservible = {"ambiente": "noche", "escenas": {"p00": {"visual": [{"objeto": "Helicoptero"}]}}}
+    _, claude = con_ia(*[inservible] * (escenas_3d.INTENTOS_GRATIS + 1))
+    assert escenas_3d.pedir("guion-x").detalle == "claude"
+    assert claude == ["guion-x"]
+
+
+def test_lo_que_queda_mal_pero_sirve_se_limpia(con_ia, tmp_path):
+    """Un prop inventado en la última vuelta no tumba el video: se descarta."""
+    casi = _plan(p00={"visual": [{"objeto": "Suelo", "humo": 1}, {"objeto": "Modelo", "modelo": "autos/police"}]})
+    _, claude = con_ia(*[casi] * (escenas_3d.INTENTOS_GRATIS + 1))
+    hechas = escenas_3d.pedir("guion-x")
+    assert hechas.ok and "se descartaron" in hechas.detalle and claude == []
+    guardado = json.loads((tmp_path / "guion-x" / "escenas.json").read_text(encoding="utf-8"))
+    assert "humo" not in guardado["escenas"]["p00"]["visual"][0]
+
+
+@pytest.mark.parametrize("valor, esperado", [("claude", ["guion-x"]), ("", ["guion-x"]), ("otro", ["guion-x"]),
+                                             ("claude_herramientas", ["herramientas"])])
+def test_sin_motor_gratis_no_se_usa_la_ia_gratis(con_ia, monkeypatch, valor, esperado):
+    ia, claude = con_ia()
+    monkeypatch.setenv("ESCENAS_MOTOR", valor)
+    escenas_3d.pedir("guion-x")
+    assert ia.prompts == [] and claude == esperado
+
+
+# --- Claude sin herramientas (12/11/2026) ----------------------------------------
+
+@pytest.fixture
+def con_claude(tmp_path, monkeypatch):
+    from dato_mata_gato_bot import claude_runner, fabrica
+
+    _guion_en_disco(tmp_path, monkeypatch, GUION)
+    monkeypatch.setattr(fabrica, "tokens_de_sesiones", lambda s: {"total": 1000})
+
+    def poner(*textos):
+        llamadas = []
+
+        def run_turn(sesion, mensaje, is_new_session, **kw):
+            llamadas.append({"mensaje": mensaje, "nueva": is_new_session, **kw})
+            t = textos[len(llamadas) - 1]
+            return claude_runner.ClaudeTurnResult(ok=t is not None, text=t or "You've hit your session limit", raw="")
+        monkeypatch.setattr(claude_runner, "run_turn", run_turn)
+        return llamadas
+    return poner
+
+
+def test_claude_json_sin_herramientas_y_a_la_primera(con_claude, tmp_path):
+    llamadas = con_claude("```json\n" + json.dumps(_plan()) + "\n```")
+    hechas = escenas_3d.pedir_claude_json("guion-x", GUION)
+    assert hechas.ok and "Claude sin herramientas" in hechas.detalle
+    assert len(llamadas) == 1 and llamadas[0]["herramientas"] == "" and llamadas[0]["sistema"]
+    assert json.loads((tmp_path / "guion-x" / "escenas.json").read_text(encoding="utf-8")) == _plan()
+
+
+def test_claude_json_corrige_en_la_misma_sesion_solo_con_la_lista(con_claude):
+    malo = _plan(p00={"visual": [{"objeto": "Suelo"}, {"objeto": "Helicoptero"}]})
+    llamadas = con_claude(json.dumps(malo), "Aquí va:\n" + json.dumps(_plan()))
+    assert escenas_3d.pedir_claude_json("guion-x", GUION).ok
+    assert [l["nueva"] for l in llamadas] == [True, False]
+    assert "Helicoptero" in llamadas[1]["mensaje"] and "CATÁLOGO" not in llamadas[1]["mensaje"]
+
+
+def test_claude_json_sin_cuota_no_insiste(con_claude):
+    llamadas = con_claude(None)
+    hechas = escenas_3d.pedir_claude_json("guion-x", GUION)
+    assert not hechas.ok and "limit" in hechas.detalle and len(llamadas) == 1
+
+
+def test_claude_json_que_no_es_json(con_claude):
+    con_claude(*["no sé"] * (escenas_3d.INTENTOS + 1))
+    assert not escenas_3d.pedir_claude_json("guion-x", GUION).ok
+
+
 # --- captcha en vez de la nota -------------------------------------------------
 
 class _Pagina:

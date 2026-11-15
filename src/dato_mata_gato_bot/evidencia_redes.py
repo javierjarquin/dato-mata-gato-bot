@@ -107,7 +107,9 @@ def bajar_video(pieza: dict, destino: Path) -> dict:
     cred = _credito(pieza, meta or {})
     return {"fuente": url, "credito": cred, "video": mp4.name,
             "titulo": (meta or {}).get("title", "")[:200],
-            "vistas": (meta or {}).get("view_count"), "likes": (meta or {}).get("like_count")}
+            "vistas": (meta or {}).get("view_count"), "likes": (meta or {}).get("like_count"),
+            # El umbral de lo viral pide comentarios (06/11/2026, instruccion_viral).
+            "comentarios": (meta or {}).get("comment_count")}
 
 
 _JS_NUMEROS = r"""

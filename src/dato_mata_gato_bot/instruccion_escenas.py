@@ -291,6 +291,44 @@ def instruccion(slug: str, guion: dict) -> str:
 REVISAR = "C:/dato-mata-gato-bot/.venv/Scripts/python.exe -m dato_mata_gato_bot.herramientas_guion escenas {slug}"
 
 
+# --- La misma instrucción para las IA gratis (12/11/2026) ------------------------
+# Las escenas eran ~100k tokens de Claude por video, tanto como el guion. Son
+# JSON contra un catálogo cerrado y la revisión de abajo es código, así que una
+# IA gratis puede escribirlas: no tiene herramientas ni archivo, contesta el
+# JSON y aquí se revisa y se le devuelve la lista de lo que falló.
+
+SOLO_JSON = """
+CÓMO RESPONDER
+Responde SOLO ese objeto JSON, {"ambiente": "...", "escenas": {...}}, completo: sin texto antes
+ni después y sin ```. Antes de responder revisa tú mismo que cada objeto, prop, modelo, animación
+y cámara exista en el CATÁLOGO, que haya una escena por cada plano (menos identidad_cierre) y que
+cada clave sea UNA palabra que la voz dice en ese plano.
+""".rstrip()
+
+
+def instruccion_json(slug: str, guion: dict) -> str:
+    """El prompt de escenas para un modelo sin herramientas: contesta el JSON."""
+    texto = instruccion(slug, guion)
+    texto = texto.replace(f"Un archivo C:\\Android_in\\{slug}\\escenas.json, así:", "Un objeto JSON, así:")
+    return texto.split("CÓMO TRABAJAR")[0].rstrip() + "\n\n" + SOLO_JSON.strip()
+
+
+def correccion_json(base: str, plan, problemas_: list[str]) -> str:
+    """El siguiente intento: la instrucción, lo que contestó y lo que marcó la revisión."""
+    anterior = json.dumps(plan, ensure_ascii=False, separators=(",", ":"))
+    return (f"{base}\n\nTU RESPUESTA ANTERIOR\n{anterior}\n\n"
+            "LA REVISIÓN MARCÓ ESTO. Corrígelo TODO y responde otra vez el JSON COMPLETO (todas las "
+            "escenas, no solo las corregidas):\n" + "\n".join(f"- {p}" for p in problemas_))
+
+
+def escenas_utiles(plan: dict, guion: dict) -> float:
+    """Qué fracción de los planos tiene una escena de verdad (Suelo y algo más)."""
+    piden = [p.get("id") for p in guion.get("planos") or [] if p.get("seccion") != "identidad_cierre"]
+    escenas = (plan or {}).get("escenas") or {}
+    buenas = sum(1 for i in piden if len(((escenas.get(i) or {}).get("visual") or [])) >= 2)
+    return buenas / len(piden) if piden else 0.0
+
+
 # --- Revisión sin Claude --------------------------------------------------------
 
 def _es_num(x) -> bool:

@@ -21,6 +21,7 @@ import requests
 
 from dato_mata_gato_bot import (
     avatar_presentador,
+    canal,
     drive_upload,
     evidencia,
     media_check,
@@ -51,7 +52,7 @@ TIMEOUT_TROCEO = 60 * 60 * 4
 MASCOTA_PATH = r"C:\illustrated-narrator\assets\mascota_gato"
 # Emblema fijo de los true crime con su voz propia (ver voz_de_true_crime).
 EMBLEMA_ESQUINA = r"C:\illustrated-narrator\assets\dato_mata_gato_emblema.png"
-ANDROID_IN = Path(r"C:\Android_in")
+ANDROID_IN = canal.entrada()  # por canal: ver canal.py
 FFMPEG = "ffmpeg"
 
 # El fallback de video-IA (NARR_VIDEO_FALLBACK_MAX_PLANOS en el .env de
@@ -1058,6 +1059,20 @@ def modo_render(slug: str, avatar: bool = False) -> str:
     return "remotion" if modo == "remotion" else "ffmpeg"
 
 
+def _umbral_viral(slug: str) -> str:
+    """Las vistas y comentarios REALES de la publicación del umbral (06/11/2026).
+    No frena el video: lo avisa, y Javier decide si lo publica."""
+    from dato_mata_gato_bot import instruccion_viral
+
+    try:
+        guion = json.loads((ANDROID_IN / slug / "guion.json").read_text(encoding="utf-8"))
+        manifest = json.loads((ANDROID_IN / slug / "evidencia" / "manifest.json").read_text(encoding="utf-8-sig"))
+        return instruccion_viral.umbral_real(guion, manifest)
+    except (OSError, ValueError) as exc:
+        logger.warning("umbral viral de %s: %s", slug, exc)
+        return ""
+
+
 def render_plus() -> bool:
     """RENDER_PLUS (default 1): Remotion con las animaciones de retención
     (CapituloPlus, 13/10/2026): mapa del lugar, contador del gancho, tarjeta de
@@ -1141,21 +1156,33 @@ def _juntar_multimedia(slug: str) -> str:
 
 
 def variante_portada(slug: str) -> str:
-    """Estilo de la portada. Desde el 29/10/2026 la C, "el gancho": fondo sólido
-    oscuro y 3 a 5 palabras (plus.portada) arriba a la izquierda; las capturas de
-    nota se leían como ruido en el perfil. PORTADA_VARIANTE=nota vuelve a la A
-    (titular real como recorte) y =dato a la B."""
-    return (os.getenv("PORTADA_VARIANTE") or "gancho").strip().lower()
+    """Estilo de la portada. Javier eligió la A, "la nota" (14/10/2026): el
+    titular real como recorte de periódico y la cifra abajo. La C, "el gancho"
+    (fondo oscuro y 3 a 5 palabras), fue la de defecto del 29/10 al 03/11/2026:
+    en el perfil no se veía bien y Javier pidió volver a la A.
+    PORTADA_VARIANTE=dato cambia a la B y =gancho a la C. Si el video no tiene
+    nota con captura, portada.py arma la B sola (es la misma imagen sin el recorte).
+
+    Los nichos 3D (tradiciones, papasia) van SIEMPRE con la C: no tienen nota de
+    prensa que recortar, y su portada se arma sola con `plus.portada`. Desde que
+    el default volvió a la A (03/11/2026) estos videos salían SIN NINGUNA
+    portada: portada.py revienta con KeyError 'planos' (un guion 3D trae
+    "escenas", no "planos") y _portadas se traga el error. Lo destapó el primer
+    video de papasia el 12/11/2026; los de tradiciones del 08 y 10/11 tampoco
+    tienen portada, y nadie lo había visto."""
+    if formato_3d(slug):
+        return "gancho"
+    return (os.getenv("PORTADA_VARIANTE") or "nota").strip().lower()
 
 
-# 30/10/2026: con 1/30 s TikTok no la tomaba como portada (escogió 0.13 s y 7 s
-# en los dos primeros videos con la gancho). Prueba con 0.2 s = 6 cuadros.
-DURACION_PORTADA = "0.2"
+# Un solo cuadro (1/30 s). Del 30/10 al 03/11/2026 se probó 0.2 s para que TikTok
+# tomara la gancho; se regresó a 1 cuadro junto con la portada A.
+DURACION_PORTADA = "0.0334"
 
 
 def _pegar_portada(final: Path, portada: Path) -> bool:
-    """La portada al inicio del video durante DURACION_PORTADA (con silencio),
-    para que TikTok la tome o se pueda escoger fácil en "Editar portada"."""
+    """La portada como PRIMER cuadro (DURACION_PORTADA, con silencio): se escoge
+    fácil en "Editar portada", y en Remotion ahí el contador estaba en 0 ("QUEDAN 0")."""
     tmp = final.with_name("final_con_portada.mp4")
     r = subprocess.run(
         ["ffmpeg", "-v", "error", "-y", "-loop", "1", "-framerate", "30", "-t", DURACION_PORTADA, "-i", str(portada),
@@ -1263,33 +1290,45 @@ def _archivar_local(slug: str, final_mp4: Path, carpeta: Path) -> Path:
     return destino
 
 
-# --- Nicho de tradiciones (30/10/2026) ----------------------------------------
+# --- Nichos de video 3D (tradiciones 30/10/2026, papasia 12/11/2026) ----------
 # Video 3D hecho con código (illustrated-narrator/tradiciones_3d): no pasa por
-# tts-kokoro ni por `narrator generate`. render.py hace la voz Fish 3 por escena,
-# Whisper y el render de Remotion (~1 min por cada 75 s); aquí se le pega la
-# portada y se archiva como cualquier otro video.
+# tts-kokoro ni por `narrator generate`. render.py hace la voz por escena (la
+# elige el guion con `voz_narrador`; sin ese campo, Fish 3), Whisper y el render
+# de Remotion (~1 min por cada 75 s); aquí se le pega la portada y se archiva
+# como cualquier otro video.
 TRADICIONES_DIR = Path(r"C:\illustrated-narrator\tradiciones_3d")
 TIMEOUT_TRADICIONES = 90 * 60  # casi todo es la voz: ~13x el largo del audio
+# formato del guion -> el módulo que lo revisa y lo resume. Los dos nichos
+# comparten render: lo que cambia es la fórmula y lo que se le exige al guion.
+FORMATOS_3D = {"tradiciones": "instruccion_tradiciones", "papasia": "instruccion_papasia"}
 
 
-def es_tradicion(slug: str) -> bool:
+def formato_3d(slug: str) -> str | None:
+    """El nicho 3D de un slug ("tradiciones", "papasia"), o None si no lo es."""
     try:
         guion = json.loads((ANDROID_IN / slug / "guion.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return False
-    return isinstance(guion, dict) and guion.get("formato") == "tradiciones"
+        return None
+    if not isinstance(guion, dict):
+        return None
+    return guion.get("formato") if guion.get("formato") in FORMATOS_3D else None
 
 
-def run_tradiciones(slug: str, progreso, destino_local: Path | None = None) -> PipelineResult:
-    from dato_mata_gato_bot import fabrica, instruccion_tradiciones  # import tardío: fabrica importa este módulo
+def run_3d(slug: str, progreso, destino_local: Path | None = None) -> PipelineResult:
+    import importlib
+
+    from dato_mata_gato_bot import fabrica  # import tardío: fabrica importa este módulo
 
     guion = json.loads((ANDROID_IN / slug / "guion.json").read_text(encoding="utf-8"))
-    if problemas := instruccion_tradiciones.problemas(guion):
+    formato = guion.get("formato")
+    revision = importlib.import_module(f"dato_mata_gato_bot.{FORMATOS_3D[formato]}")
+    if problemas := revision.problemas(guion):
         return PipelineResult(False, f"{slug}: el guion no pasa la revisión:\n"
                               + "\n".join(f"- {p}" for p in problemas), necesita_claude=True)
     if problema := fabrica.asegurar_infra():
         return PipelineResult(False, f"La voz no está disponible: {problema}", necesita_claude=False)
-    progreso("voz Fish 3, Whisper y render 3D (tradiciones)")
+    voz = NOMBRE_VOZ.get(guion.get("voz_narrador"), "Fish 3")
+    progreso(f"voz {voz}, Whisper y render 3D ({formato})")
     salida = TRADICIONES_DIR / "out" / f"{slug}.mp4"
     salida.unlink(missing_ok=True)
     try:
@@ -1316,8 +1355,8 @@ def run_tradiciones(slug: str, progreso, destino_local: Path | None = None) -> P
     shutil.move(str(salida), str(final))
     tiempos = [ln for ln in proc.stdout.splitlines() if ln.startswith(("voz lista", "render:"))]
     progreso("portada")
-    notas = "\n".join(["render: 3D de tradiciones (" + "; ".join(tiempos) + ")",
-                       instruccion_tradiciones.resumen_visual(guion), _portadas(slug, final)])
+    notas = "\n".join([f"render: 3D de {formato} (" + "; ".join(tiempos) + ")",
+                       revision.resumen_visual(guion), _portadas(slug, final)])
     if destino_local is None:
         return PipelineResult(True, f"Video listo: {final}\n{notas}")
     progreso("archivando el video")
@@ -1343,8 +1382,8 @@ def run(slug: str, voz: str, chat_id: int | None = None,
     guion_src = ANDROID_IN / slug / "guion.json"
     if not guion_src.exists():
         return PipelineResult(False, f"No existe {guion_src}", necesita_claude=False)
-    if es_tradicion(slug):
-        return run_tradiciones(slug, progreso, destino_local)
+    if formato_3d(slug):
+        return run_3d(slug, progreso, destino_local)
     # Evidencia real (29/09/2026): si el guion trae su lista de evidencia, se
     # arma ANTES de todo y el video sale sin una sola imagen de IA. Va antes de
     # _stage_guion_for_tts porque preparar() escribe en el guion (movimiento
@@ -1355,6 +1394,8 @@ def run(slug: str, voz: str, chat_id: int | None = None,
         progreso("armando la evidencia real")
         reporte = evidencia.preparar(slug)
         aviso_evidencia = reporte.resumen()
+        if slug.startswith("guion-viral-"):
+            aviso_evidencia = "\n".join(x for x in (aviso_evidencia, _umbral_viral(slug)) if x)
         if reporte.reales == 0:
             # Sin una sola pieza real no se hace el video: rellenarlo con IA es
             # justo lo que esto vino a eliminar. No escala a Claude: hay que
