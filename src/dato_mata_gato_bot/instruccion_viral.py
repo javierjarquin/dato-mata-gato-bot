@@ -35,6 +35,22 @@ Reglas que NO se negocian, por el tipo de tema que es:
   - Nada de notas animadas en los planos del rumor (ver `plus.sin_nota_animada`):
     animar el cuerpo del artículo que afirma el rumor ES publicar el rumor. Del
     nivel 1 se enseña el TITULAR que lo reporta, nunca el cuerpo que lo afirma.
+
+Lo que cambió el 06/11/2026 (Javier):
+  - VIRAL TIENE NÚMERO. Una publicación con 500 mil vistas Y 2 mil comentarios o
+    más, o más de cinco cuentas distintas hablando del tema. Va en
+    `_schema.umbral` y lo revisa el código. Antes "muchas vistas" no tenía cifra y
+    pasó un tema con un clip de 3,083 vistas (el croquis de Veracruz).
+  - Salen dos señales del umbral: que una plataforma lo bajara y que respondiera
+    una autoridad. No todo viral tiene que ir contra una autoridad.
+  - Sale la prueba del papel. No tiene que existir un documento que cierre la
+    discusión: puede seguir abierta. Lo que separa esta fórmula de la de polémica
+    es si lo que detonó todo es un HECHO (algo que pasó o que se dice que pasó)
+    o una OPINIÓN (una frase que ofendió a un grupo). El documento entra cuando
+    existe; ya no es obligatorio.
+  - Entran temas de OTRO PAÍS sin ángulo mexicano (la guerra, el robo de banco
+    en Paraguay), si el umbral se cumple con publicaciones EN ESPAÑOL
+    ("idioma": "es"); se verifican con fuentes del país del hecho o agencias.
 """
 
 import re
@@ -44,7 +60,7 @@ TEMAS = [
     ("rumor", "Un rumor que está corriendo",
      "Algo que se está diciendo en redes y que mucha gente ya vio, sobre quién se queda con "
      "algo que es de todos: el agua, la tierra, la luz, un servicio, un apoyo. Tiene que haber "
-     "DEBAJO un dato propio verificable sobre ese mismo tema, con responsable identificado."),
+     "DEBAJO algo verificable sobre ese mismo tema."),
     ("borrado", "Lo que una plataforma bajó",
      "Un video, una publicación o una cuenta que una plataforma dio de baja y de lo que se está "
      "hablando por eso mismo. Que lo bajaran es un hecho verificable y es el gancho; lo que "
@@ -68,13 +84,16 @@ separar tres cosas que en redes van revueltas.
   NIVEL 1 · LO QUE SE DICE        la versión que circula, atribuida a quién la dice y dónde.
   NIVEL 2 · LO QUE ESTÁ EN PAPEL  lo que sí está documentado, con su fuente abierta y leída.
   NIVEL 3 · LO QUE NADIE HA CONTESTADO  el hueco entre las dos, dicho en voz alta.
-El canal NO afirma el rumor y NO lo desmiente: casi nunca hay documento para ninguna de las
-dos cosas, y elegir un lado sin papel es justo lo que hace que la gente no le crea a nadie.
-Y ANTES DE EMPEZAR, LA PRUEBA DEL PAPEL (17/10/2026): esta fórmula es para disputas sobre un
-HECHO. Pregúntate si existe un papel que, si apareciera, cerraría la discusión. Si lo que
-detonó el tema es una OPINIÓN -un insulto, una burla, un juicio sobre un grupo-, no hay tal
-papel y el tema NO es de esta fórmula: es de la de LA POLÉMICA, donde el nivel 2 es la
-respuesta de los afectados. Dilo en el resumen y no lo fuerces aquí.
+"Lo que está en papel" es lo que SÍ se puede verificar: un documento si existe, pero también
+la publicación original, lo que dijo cada quien y dónde, las fechas, una cifra con su fuente.
+El canal NO afirma el rumor y NO lo desmiente si no tiene con qué: elegir un lado sin pruebas
+es justo lo que hace que la gente no le crea a nadie.
+NO HACE FALTA UN PAPEL QUE CIERRE LA DISCUSIÓN (06/11/2026): puede quedar abierta, y entonces
+el nivel 3 es eso, lo que sigue abierto. Lo que SÍ hace falta es que la disputa sea sobre un
+HECHO (algo que pasó o que se dice que pasó). Si lo que detonó el tema es una OPINIÓN -un
+insulto, una burla, un juicio sobre un grupo-, NO es de esta fórmula: es de la de LA
+POLÉMICA, donde el nivel 2 es la respuesta de los afectados. Dilo en el resumen y no lo
+fuerces aquí.
 
 LOS NIVELES VAN INTERCALADOS, NO EN FILA (lo más importante de esta fórmula)
 El error que hundió el primer video: poner el rumor al principio y treinta segundos de datos
@@ -95,23 +114,24 @@ LAS PIEZAS (las ocho, y sin una no hay video)
   3. ALGO NO CUADRA, variante 3b NADIE HA CONTESTADO: la contradicción es entre lo que se
      dice y lo que está en papel, y el hueco no lo ha llenado nadie. Esa es la brecha de
      curiosidad y se queda abierta de verdad: no la cierres inventando una respuesta.
-  4. CORAJE: contra la OPACIDAD y contra la omisión documentada, nunca contra un país, una
-     religión, un pueblo ni contra quien preguntó. El coraje sale de un hecho: un documento
-     que no se exhibió, un permiso que no se revisó, una respuesta que no llegó.
-     LA OPACIDAD TAMBIÉN ES PRIVADA (03/11/2026). Hasta esa fecha el 61% de los virales tenía
-     actor de gobierno y el canal se leía como de política local. El que esconde el papel
-     puede ser una empresa, una concesionaria, una constructora, una cadena, un patrón o una
-     plataforma: el contrato que no se publicó, el permiso que la empresa no enseñó, la
-     cláusula que nadie leyó. Que no TODOS los videos señalen a una autoridad.
+  4. CORAJE: sale de un HECHO, nunca contra un país, una religión, un pueblo ni contra quien
+     preguntó. Puede ser un abuso que se ve en el video, una mentira que se hizo viral, un
+     cobro que no cuadra, un engaño, o algo que nadie ha explicado.
+     NO TIENE QUE HABER UN CULPABLE CON CARGO (06/11/2026, Javier: "no necesariamente se
+     tiene que dirigir el ataque a una autoridad"). Hasta el 03/11 el 61% de los virales
+     tenía actor de gobierno y el canal se leía como de política local. Cuando sí hay
+     alguien que debía responder -una autoridad, una empresa, una plataforma, un patrón-,
+     se nombra; cuando no lo hay, el video se queda en el hecho y en lo que sigue abierto.
      Y NADA ELECTORAL: ni partidos, ni candidatos, ni elecciones, ni quién hizo ganar a quién,
      aunque esté dando conversación en la plataforma. No es nuestro nicho y es lo único
      político que las plataformas sí restringen. Si el tema viral es electoral, escoge otro.
-  5. SE PUEDE MOSTRAR: el documento, el acta, el expediente, el lugar. En esta fórmula la
-     evidencia es media pieza del video: sin documento en pantalla, no se graba.
+  5. SE PUEDE MOSTRAR: la publicación original, el documento si existe, el lugar, la nota.
+     En esta fórmula la evidencia es media pieza del video: sin evidencia real, no se graba.
   6. HACE HABLAR: en un tema viral esto sobra, pero la pregunta cambia de tipo. No es "¿a ti
      ya te cobraron?", es "¿tú qué versión escuchaste?". Todo el mundo tiene una versión.
-  7. VALOR PRÁCTICO: el nombre y la fecha del documento que cualquiera puede ir a buscar, o
-     dónde se consulta. Es lo que convierte al espectador en alguien que puede verificar.
+  7. VALOR PRÁCTICO: dónde lo puede ir a ver o a verificar cualquiera (la publicación, el
+     documento con su nombre y fecha, la fuente). Es lo que convierte al espectador en alguien
+     que puede verificar.
   9. LA PREGUNTA QUE QUEDA (15/10/2026, Javier: "eso hay que cuestionarlo, lanzar preguntas que
      la gente responde y opine, y dar suposiciones: ¿acaso quieren ocultar algo?"). El nivel 3
      no se cierra con un punto final -- "nadie lo ha enseñado" hace que el que ve asienta y se
@@ -203,10 +223,10 @@ institución, cuenta, funcionario-. Cada uno tiene que aparecer, escrito igual, 
 narración; la revisión automática lo comprueba.
 
 LO QUE NO SE HACE
-  - No se afirma lo que no tiene documento, ni se niega lo que no tiene documento. Se dice
-    "no está público", que es lo que sí se puede probar.
-  - No se señala a un país, una religión ni un pueblo como culpable: se señala a quien firmó,
-    a quien no exhibió, a quien no revisó. Con nombre y con cargo. Esto NO es permiso para
+  - No se afirma lo que no está verificado, ni se niega lo que no está verificado. Se dice
+    "no se sabe" o "nadie lo ha aclarado", que es lo que sí se puede probar.
+  - No se señala a un país, una religión ni un pueblo como culpable. Si hay quien debía
+    responder, se le nombra con nombre y con cargo. Esto NO es permiso para
     callar un nombre: una empresa, una dependencia o una persona con cargo se nombran siempre
     (ver NOMBRES). Lo que no se hace es convertir a un grupo entero en el responsable.
   - No se ridiculiza ni se corrige a quien hizo la pregunta. Si le bajaron el video, eso se
@@ -221,9 +241,10 @@ LO QUE NO SE HACE
 VERIFICACIÓN (en esta fórmula es el producto, no un trámite)
 1. Busca y ABRE las notas (con el comando buscar; WebFetch solo si no lo tienes o no abre). Cada cifra, fecha y nombre sale de algo que leíste.
    Los resúmenes del buscador inventan cifras: no los uses.
-2. Busca la FUENTE PRIMARIA del nivel 2 y del 3: el decreto, el punto de acuerdo, la
-   sentencia, el padrón, el informe. Un artículo de opinión no sostiene el nivel 2; sirve
-   para saber qué buscar. Si el documento está en un PDF oficial, ése es el que va.
+2. Busca la FUENTE PRIMARIA del nivel 2 y del 3 si existe: el decreto, la sentencia, el
+   padrón, el informe, la publicación original. Un artículo de opinión no sostiene el nivel
+   2; sirve para saber qué buscar. Si hay un PDF oficial, ése es el que va. Si no existe un
+   documento, el nivel 2 es lo verificable que sí hay, y el nivel 3 queda abierto.
 3. Lo que dice UNA sola fuente va atribuido en la narración ("según PorEsto…"). Las cifras de
    organizaciones civiles, activistas o empresas van SIEMPRE con su nombre.
 4. Si una cifra junta dos fuentes de años distintos, se dicen las dos con su año. Nunca se
@@ -308,10 +329,11 @@ primeros tres planos, el lugar exacto. Total: 120 a 190 palabras.
 EVIDENCIA (sin imágenes de IA; y aquí hay que ENSEÑAR el fenómeno, no contarlo)
 "evidencia" es una lista; cada plano (p00 a p07) lleva en visual.evidencia 1 a 3 ids. Mínimo
 TRES piezas reales más 2 o 3 fichas, y de esas, OBLIGATORIAS:
-  - AL MENOS UNA de tipo "documento": sin fuente primaria en pantalla el video es una opinión.
   - AL MENOS UNA de redes ("video_red" o "red_social"): el tema nació en redes y el canal
     tiene que ENSEÑARLO. Contar un video viral sin mostrarlo nunca es lo que hacía que estos
-    videos salieran planos (Javier, 15/10/2026).
+    videos salieran planos (Javier, 15/10/2026). Si el umbral es por una publicación, ESA
+    publicación va como pieza de redes, con su misma URL: así se miden sus números reales.
+  - Un "documento" (fuente primaria) cuando exista. Ya no es obligatorio (06/11/2026).
 Tipos:
 - {"id": "r1", "tipo": "video_red", "url": "https://www.tiktok.com/@cuenta/video/123",
    "fuente": "@cuenta · TikTok", "desde_seg": 3, "segundos": 6}: el clip en sí, recortado.
@@ -360,7 +382,13 @@ tema (minúsculas y guiones). Además de lo de siempre ("titulo", "gancho", "cla
   "hallado_en": "la PLATAFORMA, la cuenta y los números de la publicación donde encontraste el
      tema ('TikTok, @cuenta, 1.2 M de vistas y 8 mil comentarios, 12/10/2026'). El tema se
      busca en redes, no en los portales",
-  "impacto": "de dónde sale que esto se está hablando (vistas, que lo bajaron, qué medios)",
+  "umbral": {"publicacion": {"url": "https://www.tiktok.com/@cuenta/video/123",
+                             "vistas": 670900, "comentarios": 3710, "idioma": "es"}}
+     o, si ninguna publicación sola llega:
+            {"cuentas": [{"cuenta": "@a", "url": "https://...", "idioma": "es"}, ... seis o más]},
+  "pais": "México" (o el país donde pasó el hecho),
+  "impacto": "las señales del umbral: la publicación o las cuentas, y la otra señal con su
+     número y su fecha (medios de fuera, días de conversación, gente contando su caso)",
   "condiciones": {"1_te_afecta": "...", "2_esta_pasando_ahorita": "... (con fecha)",
                   "3_algo_no_cuadra": "...", "4_coraje": "...", "5_se_puede_grabar": "...",
                   "6_hace_hablar": "...", "7_valor_practico": "...",
@@ -396,13 +424,13 @@ fuentes", "nivel_3": "en una línea, qué es lo que nadie ha contestado"}]}
 BUSCAR_TENDENCIAS = r"""
 PRIMERO, DE QUÉ SE ESTÁ HABLANDO (antes de escribir nada)
 No te dieron tema: búscalo. Encuentra <<CUANTOS>> temas que ESTA SEMANA estén dando
-conversación en redes en México y que sirvan para esta fórmula.
+conversación en redes EN ESPAÑOL (México sobre todo) y que sirvan para esta fórmula.
 
 EL TEMA SALE DE LA PLATAFORMA, NO DE LA PRENSA (16/10/2026, Javier: "esos temas virales los
 tienes que buscar en redes sociales... el tema de Vicky Wolff salió porque era un tema popular
 en la plataforma"). Esto manda sobre todo lo demás de este apartado.
 Empieza SIEMPRE buscando DENTRO de TikTok, Facebook, Instagram, X y YouTube: qué publicación
-está juntando vistas y comentarios en México ahorita. El tema lo elige lo que la gente está
+está juntando vistas y comentarios en español ahorita. El tema lo elige lo que la gente está
 viendo, no lo que un portal decidió titular como "se hace viral".
 La prensa entra DESPUÉS, para verificar y para el nivel 2. Nunca para descubrir el tema. Si lo
 encontraste en un portal y no en una plataforma, NO es un tema viral: es una noticia, y para
@@ -422,27 +450,49 @@ Dónde mirar, en este orden (junta las búsquedas de 3 o 4 en una sola respuesta
   3. Campañas o convocatorias de colectivos con lema propio, buscadas por su lema en redes.
   4. Sólo para CONFIRMAR lo que ya encontraste arriba: lo que la prensa publicó del tema.
 
-EL UMBRAL (15/10/2026): no basta con que exista la nota.
+EL UMBRAL (15/10/2026; con número desde el 06/11/2026): no basta con que exista la nota.
 Una nota replicada el mismo día en tres portales locales NO es un fenómeno: eso fue el error
 del video del hombre que fingía discapacidad, que Javier describió como "un tema que no está
-dando de qué hablar". Pide por lo menos DOS de estas señales, y escríbelas en
-"_schema.impacto" con su número y su fecha:
-  - una publicación con MUCHAS vistas o comentarios (dilo con la cifra y de qué cuenta);
-  - que una plataforma lo haya bajado o restringido;
+dando de qué hablar". Un tema es VIRAL si cumple UNA de estas dos, y va en "_schema.umbral":
+  A) UNA PUBLICACIÓN con 500 mil vistas Y 2 mil comentarios o más, contados en la
+     publicación misma (no en lo que diga una nota). Esa publicación va también en
+     "evidencia" como pieza de redes, con la misma URL: el sistema baja sus números reales.
+  B) Si ninguna llega sola: MÁS DE CINCO CUENTAS distintas (seis o más) hablando del mismo
+     tema, cada una con la URL de su publicación.
+Y además, por lo menos UNA de estas, con su número y su fecha en "_schema.impacto":
   - que lo recojan medios de FUERA del estado, o de otro país;
   - varios días seguidos de conversación, no un solo día;
-  - respuesta de una autoridad, una empresa o la persona señalada;
   - gente contando su propio caso en los comentarios (es la mejor señal de todas).
-Si solo tienes "lo publicaron tres portales el mismo día", el tema NO va.
+Si no llegas al umbral, el tema NO va, aunque lo hayan publicado muchos portales: busca otro.
+EL UMBRAL SE CUENTA EN ESPAÑOL: la publicación, o cada una de las cuentas, tiene que estar en
+español, y lo anotas con "idioma": "es". Lo que solo fue viral en inglés o en otro idioma no
+cuenta: no prueba que tu público lo esté viendo.
 
-LA PRUEBA DEL PAPEL (17/10/2026): ESTA FÓRMULA ES PARA DISPUTAS SOBRE UN HECHO
+TEMAS DE OTRO PAÍS (06/11/2026, Javier: "las noticias mundiales extremadamente virales... lo de
+la guerra o lo del robo de banco en Paraguay"): SÍ ENTRAN, sin ángulo mexicano.
+  - Entran si cumplen el mismo umbral, contado en publicaciones en español. Eso es lo que
+    dice que la gente que ve el canal lo está viendo.
+  - NO le cuelgues un ángulo mexicano que no existe ("¿y si pasara aquí?") ni infles cómo te
+    afecta: la pieza 1 en un tema de fuera es "lo estás viendo en tu feed y todos tienen una
+    versión", y se sostiene con lo que nadie ha contestado.
+  - Se verifica con fuentes del PAÍS DEL HECHO (su fiscalía, su policía, su gobierno, su
+    prensa) o con agencias (EFE, AFP, Reuters, AP). Una nota mexicana que repite lo que dijo
+    otro medio no es fuente: busca el original.
+  - El país va dicho en el gancho o en el primer plano, y el "mapa" lleva ciudad y país
+    ("Banco ..., Asunción, Paraguay").
+  - Una guerra entra por un HECHO concreto que circula (un video, una versión de lo que pasó
+    en un lugar y una fecha), nunca como "quién tiene la razón": eso es opinión y el canal no
+    toma bando entre países ni pueblos.
+
+¿HECHO U OPINIÓN? (06/11/2026; antes era "la prueba del papel"): ESTA FÓRMULA ES PARA HECHOS
 Antes de quedarte con un tema, contesta una pregunta:
-  ¿EXISTE UN PAPEL QUE, SI APARECIERA, CERRARÍA LA DISCUSIÓN?
-Si SÍ -> es tema de esta fórmula. El agua de Yucatán lo era: el contrato de Conagua con
-Mekorot existe o no existe, y un senador pidió exhibirlo en 2016.
-Si NO, porque lo que detonó todo es una OPINIÓN -> NO es de esta fórmula. Va en la de LA
-POLÉMICA (`instruccion_polemica`), donde el nivel 2 es la respuesta de los afectados y no un
-documento. Dilo y cambia de tema; no lo fuerces aquí.
+  ¿LO QUE DETONÓ TODO ES ALGO QUE PASÓ (O QUE SE DICE QUE PASÓ), O UNA OPINIÓN?
+Si es un HECHO -> es tema de esta fórmula, aunque no exista un papel que cierre la discusión:
+puede quedar abierta. El agua de Yucatán lo era; también un video donde se ve algo y nadie
+sabe bien qué pasó.
+Si es una OPINIÓN (una frase, un insulto, una burla, un juicio sobre un grupo) -> NO es de
+esta fórmula. Va en la de LA POLÉMICA (`instruccion_polemica`), donde el nivel 2 es la
+respuesta de los afectados. Dilo y cambia de tema; no lo fuerces aquí.
 Pasó el 16/10/2026 con el Conalep: un podcast llamó "bandidazos" a los alumnos y el guion acabó
 preguntando "¿dónde está el informe de empleabilidad?" a gente que llegó enojada porque
 ofendieron a su escuela. "Son bandidazos" no es una versión de los hechos: es un juicio, y
@@ -452,18 +502,19 @@ frase es un hallazgo (el papel podría existir y no está); en un insulto es una
 
 Un tema sirve para esta fórmula solo si cumple LAS TRES:
   a) se está hablando de verdad y lo pruebas con el umbral de arriba;
-  b) debajo hay un DATO PROPIO verificable QUE CONTESTA LA MISMA PREGUNTA, con responsable
-     identificado y de preferencia con fuente primaria (decreto, contrato, padrón, informe);
+  b) debajo hay algo VERIFICABLE QUE CONTESTA LA MISMA PREGUNTA (no tiene que cerrarla): la
+     publicación original, lo que dijo cada quien, una cifra con fuente, un documento si hay;
   c) pasa el candado completo, (a) y (b) del apartado del candado.
 Si un tema no tiene (b), NO lo tomes aunque esté muy viral: ahí el canal solo repetiría el
 rumor. Busca otro.
 
 NO tomes: rumores sobre personas privadas, chismes de espectáculos, bulos de salud que
 convenga repetir aunque sea para negarlos, ni nada donde el único contenido posible sea la
-acusación. Si un tema señala a un país, una religión o un pueblo, el video va contra quien
-firmó o quien no exhibió el papel, nunca contra el grupo.
+acusación. Si un tema señala a un país, una religión o un pueblo, el video nunca va contra el
+grupo.
 
-Antes de escribir, dime en una línea por tema cuál elegiste y qué dato propio tiene debajo.
+Antes de escribir, dime en una línea por tema cuál elegiste, con qué llega al umbral y qué
+tiene de verificable debajo.
 Luego escribe los <<CUANTOS>> guiones.
 """.strip()
 
@@ -495,6 +546,11 @@ PLATAFORMAS = ("tiktok", "facebook", "instagram", "youtube", "threads", " x ", "
 # Los planos del nivel 2: los que tienen que contestar la pregunta del público.
 PLANOS_DEL_DATO = ("p03", "p04", "p05", "p06", "p07")
 DE_REDES = {"video_red", "red_social"}
+# Qué es viral (06/11/2026, Javier): una publicación con estas dos cifras, o más
+# de cinco cuentas distintas hablando del tema.
+UMBRAL_VISTAS = 500_000
+UMBRAL_COMENTARIOS = 2_000
+MIN_CUENTAS = 6
 _MIN_DATOS = 3
 # Palabras sin carga: no sirven para saber si el nivel 2 habla del mismo tema.
 _VACIAS = {"que", "para", "como", "cuando", "donde", "porque", "pero", "esto", "esta",
@@ -583,10 +639,9 @@ def problemas(guion: dict) -> list[str]:
                    "video del hombre que fingía discapacidad terminó hablando de multas de "
                    "estacionamiento)")
 
+    # El documento ya no es obligatorio (06/11/2026): la discusión puede quedar
+    # abierta. Lo que sí: enseñar la publicación.
     tipos = {p.get("tipo") for p in guion.get("evidencia", [])}
-    if "documento" not in tipos:
-        out.append("sin evidencia de tipo \"documento\": en un tema viral el video necesita una "
-                   "fuente primaria en pantalla (decreto, punto de acuerdo, contrato, informe)")
     if not (tipos & DE_REDES):
         out.append("sin evidencia de redes (\"video_red\" o \"red_social\"): el tema nació en "
                    "redes y hay que ENSEÑARLO, no contarlo de oídas")
@@ -599,7 +654,138 @@ def problemas(guion: dict) -> list[str]:
     out += _problemas_de_nombres(guion, schema)
     out += _problemas_del_check_final(guion, schema)
     out += _problemas_de_hallazgo(schema)
+    out += _problemas_de_umbral(guion, schema)
     return out
+
+
+def cifra(valor) -> int | None:
+    """670900, "670.9 mil", "1.2 M", "2,500", "56.8K" -> entero. None si no se lee."""
+    if isinstance(valor, bool):
+        return None
+    if isinstance(valor, (int, float)):
+        return int(valor)
+    t = _sin_acentos(str(valor or "")).strip()
+    m = re.search(r"(\d+(?:[.,]\d+)*)\s*(millones|millon|mil|m|k|b)?\b", t)
+    if not m:
+        return None
+    numero, escala = m.group(1), m.group(2) or ""
+    if escala:
+        # Con escala, la coma o el punto es decimal: "1,2 M" = "1.2 M".
+        base = float(numero.replace(",", "."))
+    else:
+        # Sin escala son separadores de miles: "2,500" o "2.500".
+        base = float(re.sub(r"[.,]", "", numero))
+    por = {"millones": 1e6, "millon": 1e6, "m": 1e6, "mil": 1e3, "k": 1e3, "b": 1e9}.get(escala, 1)
+    return int(base * por)
+
+
+def _cuenta_de(url: str) -> str:
+    """La cuenta que publicó, sacada de la URL ("tiktok.com/@ana/video/1" -> "TikTok:@ana")."""
+    from dato_mata_gato_bot import evidencia_redes
+
+    m = re.match(r"https?://(?:www\.|m\.)?([^/]+)/([^/?#]+)", str(url or ""))
+    return f"{evidencia_redes.red_de(url)}:{m.group(2).lower()}" if m else ""
+
+
+def _problemas_de_umbral(guion: dict, schema: dict) -> list[str]:
+    """Qué es viral, con número (06/11/2026). La cifra la escribe Claude; la
+    real la mide `umbral_real` cuando se baja la publicación."""
+    from dato_mata_gato_bot import evidencia_redes
+
+    umbral = schema.get("umbral")
+    umbral = umbral if isinstance(umbral, dict) else {}
+    pub = umbral.get("publicacion") if isinstance(umbral.get("publicacion"), dict) else None
+    cuentas = umbral.get("cuentas") if isinstance(umbral.get("cuentas"), list) else None
+    regla = (f"una publicación con {UMBRAL_VISTAS:,} vistas y {UMBRAL_COMENTARIOS:,} comentarios "
+             f"o más, o {MIN_CUENTAS} cuentas distintas o más hablando del tema, en español")
+    if not pub and not cuentas:
+        return [f'falta "_schema.umbral": {regla}. Si el tema no llega, no es viral: busca otro']
+    if pub:
+        vistas, comentarios = cifra(pub.get("vistas")), cifra(pub.get("comentarios"))
+        out = []
+        if vistas is None or comentarios is None:
+            out.append('"_schema.umbral.publicacion" necesita "vistas" y "comentarios" con número')
+        elif vistas < UMBRAL_VISTAS or comentarios < UMBRAL_COMENTARIOS:
+            out.append(f"la publicación del umbral tiene {vistas:,} vistas y {comentarios:,} "
+                       f"comentarios; viral es {regla}. Busca otro tema o junta las cuentas")
+        if not _en_espanol(pub):
+            out.append('la publicación del umbral necesita "idioma": "es". Lo que solo fue viral en '
+                       "otro idioma no cuenta: no prueba que tu público lo esté viendo")
+        url = str(pub.get("url", "")).strip()
+        if not evidencia_redes.es_red_social(url):
+            out.append('"_schema.umbral.publicacion.url" tiene que ser la URL de la publicación en '
+                       "la red (TikTok, Facebook, Instagram, X, YouTube, Threads)")
+        elif url not in {str(p.get("url", "")).strip() for p in guion.get("evidencia", [])
+                         if p.get("tipo") in DE_REDES}:
+            out.append("la publicación del umbral no está en \"evidencia\" como pieza de redes "
+                       "con la misma URL: sin eso no se pueden medir sus números reales")
+        return out
+    distintas = set()
+    for c in cuentas:
+        url = str(c.get("url", "") if isinstance(c, dict) else c).strip()
+        nombre = str(c.get("cuenta", "") if isinstance(c, dict) else "").strip().lower()
+        if evidencia_redes.es_red_social(url) and isinstance(c, dict) and _en_espanol(c):
+            distintas.add(nombre or _cuenta_de(url))
+    if len(distintas) < MIN_CUENTAS:
+        return [f'"_schema.umbral.cuentas" trae {len(distintas)} cuentas distintas en español '
+                f'("idioma": "es") con URL de una red; viral es {regla}']
+    return []
+
+
+def _en_espanol(d: dict) -> bool:
+    return _sin_acentos(str(d.get("idioma", ""))).strip() in {"es", "espanol", "es-mx", "es-419"}
+
+
+# Palabras que casi solo usa el español: el título del clip bajado dice si la
+# publicación del umbral de verdad está en español (06/11/2026).
+_DEL_ESPANOL = {"el", "la", "los", "las", "de", "que", "en", "por", "para", "con", "una", "esto",
+                "este", "esta", "como", "pero", "mas", "muy", "porque", "cuando", "donde", "asi",
+                "lo", "le", "se", "ya", "y", "es", "son", "fue", "hay", "del", "al", "su", "sus"}
+_DE_OTRO = {"the", "and", "of", "to", "is", "this", "that", "with", "for", "you", "what", "was",
+            "are", "it", "in", "on", "e", "do", "da", "uma", "nao", "voce"}
+
+
+def parece_espanol(texto: str) -> bool | None:
+    """True/False por las palabras más comunes; None si no hay con qué decidir."""
+    palabras = re.findall(r"[a-zñ]+", _sin_acentos(texto or "").lower())
+    es = sum(w in _DEL_ESPANOL for w in palabras)
+    otro = sum(w in _DE_OTRO for w in palabras)
+    if es + otro < 3:
+        return None
+    return es > otro
+
+
+def umbral_real(guion: dict, manifest: dict) -> str:
+    """Los números REALES de la publicación del umbral, ya bajada, contra lo
+    que escribió Claude. Va al aviso de Telegram: Javier decide si lo publica.
+    Vacío si el umbral es por cuentas o no hay qué medir."""
+    umbral = (guion.get("_schema") or {}).get("umbral")
+    pub = umbral.get("publicacion") if isinstance(umbral, dict) else None
+    if not isinstance(pub, dict):
+        return ""
+    url = str(pub.get("url", "")).strip()
+    meta = next((m for m in manifest.values()
+                 if isinstance(m, dict) and str(m.get("fuente", "")).strip() == url), None)
+    if meta is None:
+        return "umbral: no se pudo bajar la publicación para medirla"
+    vistas, comentarios = meta.get("vistas"), meta.get("comentarios")
+    for n in meta.get("numeros") or []:
+        # La captura de la publicación trae los números como texto.
+        t = _sin_acentos(str(n))
+        if vistas is None and re.search(r"vistas|views|reproducciones", t):
+            vistas = cifra(t)
+        elif comentarios is None and re.search(r"comentarios|comments", t):
+            comentarios = cifra(t)
+    if vistas is None and comentarios is None:
+        return "umbral: la red no dio los números; revísalos a mano"
+    corto = [f"{vistas:,} vistas" if vistas is not None else "vistas sin dato",
+             f"{comentarios:,} comentarios" if comentarios is not None else "comentarios sin dato"]
+    bajo = ((vistas is not None and vistas < UMBRAL_VISTAS)
+            or (comentarios is not None and comentarios < UMBRAL_COMENTARIOS))
+    linea = ("⚠️ umbral NO se cumple en la publicación real: " if bajo else "umbral real: ") + ", ".join(corto)
+    if parece_espanol(str(meta.get("titulo", ""))) is False:
+        linea += f"\n⚠️ la publicación del umbral no parece estar en español: «{str(meta['titulo'])[:80]}»"
+    return linea
 
 
 def _problemas_de_hallazgo(schema: dict) -> list[str]:

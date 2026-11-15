@@ -24,10 +24,11 @@ def test_cercania_da_ejemplos_de_responsable_privado():
         assert ejemplo in texto, f"falta el ejemplo: {ejemplo}"
 
 
-def test_viral_abre_la_opacidad_a_lo_privado():
-    """El coraje de viral era "contra la OPACIDAD", que apunta a autoridades."""
+def test_viral_no_tiene_que_ir_contra_una_autoridad():
+    """El coraje de viral era "contra la OPACIDAD", que apunta a autoridades.
+    Desde el 06/11/2026 (Javier) ni siquiera hace falta un culpable con cargo."""
     texto = instrucciones()["viral"]
-    assert "LA OPACIDAD TAMBIÉN ES PRIVADA" in texto
+    assert "NO TIENE QUE HABER UN CULPABLE CON CARGO" in texto
 
 
 def test_las_tres_formulas_prohiben_lo_electoral():

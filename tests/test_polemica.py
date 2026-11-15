@@ -98,13 +98,14 @@ def test_la_prueba_del_papel_manda_los_insultos_a_la_otra_formula():
     informe de empleabilidad?" a gente que llegó enojada porque ofendieron a su
     escuela. La fórmula del rumor asume que la disputa es sobre un hecho."""
     viral = instruccion_viral.instruccion(3, None, "-")
-    assert "LA PRUEBA DEL PAPEL" in viral
+    # 06/11/2026: ya no es "la prueba del papel" sino hecho u opinión.
+    assert "¿HECHO U OPINIÓN?" in viral
     assert "instruccion_polemica" in viral
     # Y la señal de que te está pasando: el nivel 3 queda en una obviedad.
     assert "puede probarlo ni descartarlo" in viral
 
     polemica = instruccion_polemica.instruccion(3, "conalep bandidos del jale", "-")
-    assert "¿EXISTE UN PAPEL QUE, SI APARECIERA, CERRARÍA LA DISCUSIÓN?" in polemica
+    assert "¿LO QUE DETONÓ TODO ES UN HECHO O UNA OPINIÓN?" in polemica
     assert "por_que_esta_formula" in polemica
 
     sin_prueba = _base()

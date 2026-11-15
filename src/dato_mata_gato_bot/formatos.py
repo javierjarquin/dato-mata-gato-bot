@@ -37,6 +37,45 @@ class Formato:
     peso: int = 1             # cuánto aparece en un lote grande
 
 
+# La serie (06/11/2026, prueba de un mes con todos los formatos): UN caso en
+# tres guiones. Es lo que más seguidores trae: quien vio la parte 1 sigue a la
+# cuenta para ver la 2. No entra en ORDEN ni en los repartos de crimen: la
+# fábrica la escribe entera de una vez y la suelta parte por parte
+# (fabrica._guiones_serie). Sus slugs terminan en -parte-1, -parte-2, -parte-3.
+SERIE = "serie"
+PARTES_SERIE = 3
+
+_SERIE = Formato(
+    clave=SERIE,
+    descripcion="de serie en tres partes",
+    instruccion=(
+        "FORMATO DE ESTE ENCARGO -- SERIE EN TRES PARTES. Manda sobre lo de arriba.\n"
+        "NO son tres casos: es UN SOLO caso real, contado en TRES guiones seguidos. Elegí un "
+        "caso que dé para tres videos sin relleno: con giros (una pista nueva, un sospechoso "
+        "que cambia, una versión oficial que se cae, un juicio). Si no tiene tres giros "
+        "documentados, elegí otro caso.\n"
+        "LOS TRES SLUGS: guion-serie-<caso>-parte-1, guion-serie-<caso>-parte-2 y "
+        "guion-serie-<caso>-parte-3 (el mismo <caso> en los tres). \"titulo\": el nombre del "
+        "caso con la parte: \"Caso X (1/3)\", \"Caso X (2/3)\", \"Caso X (3/3)\".\n"
+        "QUÉ VA EN CADA UNO: la parte 1 presenta a la víctima, el lugar y el hecho, y termina "
+        "en el primer giro. La parte 2 es la investigación y termina en el segundo giro. La "
+        "parte 3 es el desenlace (o lo que sigue abierto, dicho así) y cierra en bucle con la "
+        "parte 1. Cada dato en UNA sola parte: no repitas hechos para llenar.\n"
+        "CADA PARTE SE ENTIENDE SOLA: alguien puede llegar directo a la parte 2. En la 2 y la "
+        "3, el p01 trae en UNA frase lo que pasó antes (máximo 15 palabras).\n"
+        "EL CIERRE NO ES EL DE SIEMPRE: en las partes 1 y 2 el último plano de contenido deja "
+        "el giro sin resolver (no en bucle), y el plano de identidad_cierre dice la firma del "
+        "canal + \"Sígueme para no perderte la parte dos.\" (en "
+        "la 2: \"Sígueme para no perderte la parte tres.\"). En la parte 3: la firma + una "
+        "pregunta de sí o no sobre el caso completo.\n"
+        "LAS REGLAS DE NOMBRES, LUGAR EXACTO Y EVIDENCIA REAL valen para CADA parte: cada "
+        "guion lleva sus propias piezas de evidencia, sin repetir las de otra parte.\n"
+        "En el bloque JSON del final van LOS TRES, en orden.\n"
+    ),
+    peso=0,
+)
+
+
 # El formato de siempre: el caso contado de principio a fin, metiendo al
 # espectador en los zapatos de la víctima. Sigue siendo el más fuerte, pero
 # deja de ser el único.
@@ -155,7 +194,7 @@ _DATO_15 = Formato(
 )
 
 FORMATOS = {f.clave: f for f in (_CLASICO, _FAMOSO, _ABIERTO, _VERSION_OFICIAL,
-                                 _CULPABLE, _DATO_15)}
+                                 _CULPABLE, _DATO_15, _SERIE)}
 
 # Los de crimen, en el orden en que se reparten. La trivia va aparte porque no
 # pasa por Claude: sale del banco de preguntas.
