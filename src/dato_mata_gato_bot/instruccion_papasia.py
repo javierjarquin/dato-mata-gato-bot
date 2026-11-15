@@ -38,15 +38,16 @@ from dato_mata_gato_bot import instruccion_tradiciones as _trad
 # commit fd01699) más los de tradiciones que sirven para este nicho. Si algo no
 # está aquí, el render no sabría dibujarlo.
 CATALOGO = {
-    "Bebe": ("un bebé envuelto en su cobija, estilo juguete (alto ~1.6, centrado en y = 0); es el "
-             "protagonista del canal",
+    "Bebe": ("un bebé envuelto en su cobija, de plastilina, con gorrito de osito (alto ~2.1, de "
+             "y = -1.05 a 1.05: con escala 1 queda sentado en la nube); es el protagonista del canal",
              {"duerme": "0-1: ojos cerrados y respiración lenta", "llora": "0-1: boca abierta, cara roja, "
               "puños arriba y temblorina", "brazos": "0-1: los saca del envoltorio",
               "brillo": "0-1: se ilumina cuando se habla de él", "cobija": "#hex (azul por defecto)"}),
     "Cuna": ("una cuna de madera con barrotes; el bebé va dentro con posicion [0, -0.2, 0]",
              {"colchon": "0-1 (1 = con colchón; 0 = vacía)", "barrotes": "9",
               "brillo": "0-1", "madera": "#hex"}),
-    "Biberon": ("un biberón; el nivel de leche se anima para hablar de tomas y cantidades",
+    "Biberon": ("un biberón gordito (alto ~1.75, sentado en la nube); el nivel de leche se anima "
+                "para hablar de tomas y cantidades",
                 {"nivel": "0-1: cuánta leche tiene (0.6)", "brillo": "0-1",
                  "leche": "#hex", "tapa": "#hex"}),
     "Calendario": _trad.CATALOGO["Calendario"],
@@ -233,6 +234,10 @@ Cualquier prop numérico se puede ANIMAR: {"de": 0, "a": 1, "desde": 0.55, "hast
 
 CATÁLOGO (usa SOLO esto)
 <<CATALOGO>>
+CÓMO SE VE (15/11/2026): plastilina pastel sobre una nube rosa, con fondo claro. El render pone
+solo la nube, el fondo y la luz, y vuelve pastel cualquier color que mandes: no uses Piso ni
+colores oscuros. El cuadro es vertical: con la cámara normal solo se ve de x = -1 a x = 1; lo
+que pongas más afuera NO sale (un Bebe chico junto al Calendario va en x = 0.6, no en 1.4).
 EL PROTAGONISTA: <<PROTAGONISTAS>>. Va en "protagonista" ({"objeto": "Bebe"}), sale en la
 primera escena y en alguna de las tres últimas.
 
