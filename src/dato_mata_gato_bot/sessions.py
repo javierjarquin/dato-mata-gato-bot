@@ -9,10 +9,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+from dato_mata_gato_bot import canal
+
+# Por canal (15/11/2026): `data/` para Dato Mata Gato, `data/papasia/` para el
+# bot de papasia. Los dos bots le hablan al mismo chat de Javier; con un solo
+# archivo compartían la conversación con Claude y la bandera de "generando".
+DATA_DIR = canal.data_dir()
 SESSIONS_PATH = DATA_DIR / "sessions.json"
 STAGING_DIR = DATA_DIR / "staging"
-ANDROID_IN = Path(r"C:\Android_in")
+ANDROID_IN = canal.entrada()
 
 PHASE_IDLE = "idle"
 PHASE_COLLECTING = "recolectando"

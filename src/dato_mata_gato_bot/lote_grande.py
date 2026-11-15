@@ -22,11 +22,11 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from dato_mata_gato_bot import avatar_presentador
+from dato_mata_gato_bot import avatar_presentador, canal
 
 logger = logging.getLogger(__name__)
 
-CARPETA_LOTES = Path(r"C:\Android_in\lotes")
+CARPETA_LOTES = canal.entrada() / "lotes"
 
 # Uno de cada diez videos lleva presentador. Era uno de cada cinco hasta el
 # 28/09/2026, cuando el usuario pidió bajar su presencia. Además, desde ese día
@@ -60,7 +60,7 @@ def carpeta_del_dia(hoy: date | None = None) -> Path:
     return CARPETA_LOTES / (hoy or date.today()).strftime("%Y-%m-%d")
 
 
-ENTRADA_GUIONES = Path(r"C:\Android_in")
+ENTRADA_GUIONES = canal.entrada()
 
 # Un video de 15 segundos no justifica media hora de sincronizado de labios, y
 # en una trivia el presentador taparía las tarjetas de pregunta. El avatar va

@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import re
+import sys
 import uuid
 from datetime import datetime, time, timezone
 from pathlib import Path
@@ -33,6 +34,21 @@ from dotenv import load_dotenv
 # pipeline.GOOGLE_DRIVE_FOLDER_ID quedaba en "" pese a que el .env sí lo
 # tenía, porque el import de pipeline pasaba antes que este load_dotenv()).
 load_dotenv()
+
+
+# Perfil de canal (12/11/2026): `--perfil papasia` carga `.env.papasia` ENCIMA
+# del .env base, para correr un SEGUNDO bot (otro token, otro nicho) con este
+# mismo motor. Va aquí y no en main() por lo mismo que el load_dotenv() de
+# arriba: los módulos que se importan abajo leen variables al importarse.
+# `canal` no lee ninguna, por eso sí puede importarse antes.
+#
+# Los dos bots NO pueden compartir token: Telegram deja un solo lector por
+# token y el segundo proceso tumba al primero (error 409).
+from dato_mata_gato_bot import canal  # noqa: E402
+
+# `or canal.actual()`: la fábrica importa este módulo desde otro proceso
+# (tools/fabrica.py --perfil papasia), que ya cargó el perfil por su cuenta.
+PERFIL = canal.cargar(canal.de_argv()) or canal.actual()
 
 from telegram import Update  # noqa: E402
 from telegram.constants import ParseMode  # noqa: E402
@@ -69,7 +85,7 @@ from dato_mata_gato_bot.logging_config import setup_logging  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-ANDROID_IN = Path(r"C:\Android_in")
+ANDROID_IN = canal.entrada()  # por canal: ver canal.py
 TELEGRAM_MSG_LIMIT = 4000
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".bmp"}
 
@@ -574,9 +590,14 @@ HELP_TEXT = """Comandos disponibles — flujo típico: /nuevovideo → mandar gu
   Ejemplo: /generar
   Requiere: haber mandado guion.json antes con /nuevovideo.
 
-/lotegrande [cantidad] [dia | 0-9] [tema | cercania | variado]
-  DEFAULT (20/10/2026): la mayoría polémica, el resto tema viral, y una de cada
-  cinco comparativa (ahora contra antes). De 2 en 2: escribe 2, los genera, sigue.
+/lotegrande [cantidad] [dia | 0-9] [tema | redes | cercania | variado]
+  DEFAULT (06/11/2026, prueba de un mes): TODOS los formatos rotando, uno de
+  cada uno: tema viral, caso (true crime), lo que no te dicen, tradiciones 3D,
+  serie en 3 partes (una parte por turno), polémica, comparativa y noticia
+  local. Si pides 5, salen 5 formatos distintos; el siguiente lote sigue donde
+  quedó este. Cada video llega con "Formato: X" para publicar parejo.
+  Con "redes": la mayoría polémica, el resto tema viral, y una de cada cinco
+  comparativa (ahora contra antes). De 2 en 2: escribe 2, los genera, sigue.
   Claude busca de qué se está hablando; la fábrica escribe Y genera sola, sigue
   sola si se acaba la cuota, y cada video te llega aquí (se archiva sin
   publicar). Ejemplos: /lotegrande 10 · /lotegrande 20 0-9 (Claude de 0 a 9 h)
@@ -595,9 +616,11 @@ HELP_TEXT = """Comandos disponibles — flujo típico: /nuevovideo → mandar gu
   bajaron, "van a privatizar"). Otra fórmula: TRES NIVELES intercalados -- lo que
   se dice (atribuido) / lo que está en papel / lo que nadie ha contestado -- y el
   rumor regresa a la mitad del video. El canal no afirma ni desmiente lo que no
-  tiene documento: enseña el hueco.
-  Cada guion necesita un documento oficial en pantalla y pasar el candado: si el
-  dato propio no vale el video sin el rumor, el tema se descarta solo.
+  está verificado: enseña el hueco, y la discusión puede quedar abierta.
+  Viral = una publicación con 500 mil vistas y 2 mil comentarios, o más de 5
+  cuentas hablando del tema, en español. Puede ser de otro país (una guerra, un
+  robo en Paraguay) sin ángulo mexicano. Y pasa el candado: si lo verificable no
+  vale el video sin el rumor, el tema se descarta solo.
   Escribe Y genera sola, como la fábrica. Default 5: los temas se enfrían.
   Ejemplos: /temaviral 5 israel y yucatan
             /temaviral 5     → Claude busca las tendencias de la semana
@@ -605,13 +628,13 @@ HELP_TEXT = """Comandos disponibles — flujo típico: /nuevovideo → mandar gu
 
 /polemica [cantidad] [tema]
   Para los virales que detonó una OPINIÓN, no una versión de los hechos: un
-  insulto, una burla, un juicio sobre todo un grupo. Ahí no hay papel que cierre
-  la discusión, así que la fórmula es otra: la causa (la frase, citada) / la
+  insulto, una burla, un juicio sobre todo un grupo. Una opinión no se verifica,
+  así que la fórmula es otra: la causa (la frase, citada) / la
   respuesta de los afectados, medida / la premisa que la opinión da por cierta y
   la cifra que la desarma. El hueco no es el papel que nadie enseñó: es la
   respuesta que nadie dio. Y el veredicto lo pide el video, no lo da.
-  La prueba para elegir entre las dos: ¿existe un papel que, si apareciera,
-  cerraría la discusión? Sí → /temaviral. No → /polemica.
+  Para elegir entre las dos: ¿lo que detonó todo es un hecho o una opinión?
+  Hecho → /temaviral. Opinión → /polemica.
 
 /comparativa [cantidad] [tema]
   ¿Quién lo hace mejor? Una situación (agua, seguridad, transporte, un trámite),
@@ -795,7 +818,7 @@ BOT_COMMANDS = [
     ("mitos", "Lote de mitos y leyendas [cantidad]"),
     ("completarlote", "Escribir lo que faltó del último lote (si se acabó la cuota)"),
     ("generarlote", "Generar los videos del último lote"),
-    ("lotegrande", "Lote grande: polémica + viral [cantidad] [0-9] · cercania · variado"),
+    ("lotegrande", "Lote grande: todos los formatos [cantidad] [0-9] · redes · cercania · variado"),
     ("temaviral", "Tema viral [cantidad] [tema] (sin tema, busca tendencias)"),
     ("polemica", "Polémica [cantidad] [tema] (cuando lo viral lo detonó una opinión)"),
     ("comparativa", "Comparativa [cantidad] [tema]: ahora vs antes, ¿quién lo hace mejor?"),
@@ -812,18 +835,68 @@ BOT_COMMANDS = [
 ]
 
 
+# --- Canal papasia (15/11/2026): su bot ofrece SOLO esto. Antes los dos bots
+# traían la lista completa: el de papasia aceptaba /lotegrande y el de Dato Mata
+# Gato aceptaba /papasia.
+HELP_PAPASIA = """Canal PAPASIA — para papás y mamás primerizos.
+
+/papasia [cantidad] [tema]
+  Una preocupación de las primeras semanas ("¿por qué llora a la misma hora cada
+  tarde?"), contestada con lo que dicen las instituciones de salud. Video 3D
+  estilo juguete (bebé, cuna, biberón), con la voz Viral C.
+  La IA gratis lee a la AAP y MedlinePlus; Claude solo escribe (un turno por
+  guion). Es salud infantil, así que la revisión rechaza sola lo que no se puede
+  decir: medicamentos, dosis, diagnósticos, "esto cura", "no te preocupes si…" y
+  las vacunas. Cada dato lleva la liga de una institución y todos los videos
+  dicen cuándo SÍ hay que ir al pediatra.
+  Escribe Y genera sola; cada video te llega aquí y se archiva sin publicar.
+  Ejemplos: /papasia 2 el hipo del bebé
+            /papasia 2     → escoge dudas de las primeras doce semanas
+
+/fabrica
+  Cómo va el lote de este canal.
+
+/pararfabrica
+  Detiene el lote de este canal: el video que se esté generando termina.
+
+/estatus
+  Si hay algo corriendo ahora.
+
+/nuevo
+  Reinicia la conversación con Claude de este chat (la de este bot; la del bot
+  de Dato Mata Gato es otra).
+
+La voz y el render son los mismos de Dato Mata Gato, así que va un lote a la
+vez entre los dos canales: si el otro está trabajando, este espera.
+
+/ayuda o /help — vuelve a mostrar este mensaje."""
+
+BOT_COMMANDS_PAPASIA = [
+    ("papasia", "Papás primerizos [cantidad] [tema] (video 3D)"),
+    ("fabrica", "Cómo va el lote de este canal"),
+    ("pararfabrica", "Detener el lote de este canal"),
+    ("estatus", "Ver si hay algo corriendo"),
+    ("nuevo", "Reiniciar la conversación con Claude"),
+    ("ayuda", "Ver los comandos con ejemplos"),
+]
+
+
+def _ayuda() -> str:
+    return HELP_PAPASIA if PERFIL == "papasia" else HELP_TEXT
+
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _authorized(update.effective_chat.id):
         await _reject_unauthorized(update)
         return
-    await _send_long(update, HELP_TEXT)
+    await _send_long(update, _ayuda())
 
 
 async def cmd_ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _authorized(update.effective_chat.id):
         await _reject_unauthorized(update)
         return
-    await _send_long(update, HELP_TEXT)
+    await _send_long(update, _ayuda())
 
 
 async def cmd_nuevovideo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1090,19 +1163,21 @@ async def cmd_lote(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def cmd_lotegrande(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Lote grande. Uso: /lotegrande [cantidad] [dia | 0-9] [tema | cercania | variado]
 
-    Desde el 20/10/2026 el default es la fábrica automática de REDES (3 polémica
-    : 2 tema viral): Javier mandó "/lotegrande 10" esperando eso y le salió el
+    Desde el 06/11/2026 el default es "todos": los ocho formatos rotando, uno de
+    cada uno (prueba de un mes; Javier: "si te pido 5 es uno de cada formato").
+    Del 20/10 al 06/11 fue la fábrica de REDES (3 polémica : 2 tema viral), que
+    sigue con "redes". Javier mandó "/lotegrande 10" esperando eso y le salió el
     lote viejo de crimen + trivia. Ese sigue con "variado" (solo ESCRIBE; generar
     es /generargrande). Con tema o "cercania", la fórmula de la contradicción local.
     """
     from dato_mata_gato_bot import instruccion_cercania
 
     temas = {clave: nombre for clave, nombre, _ in instruccion_cercania.TEMAS}
-    n, tema, horario, modo = _LOTE_GRANDE_DEFAULT, None, None, "redes"
+    n, tema, horario, modo = _LOTE_GRANDE_DEFAULT, None, None, "todos"
     for arg in context.args or []:
         if arg.isdigit():
             n = int(arg)
-        elif arg.lower() in ("redes", "cercania", "variado", "tradiciones"):
+        elif arg.lower() in ("todos", "redes", "cercania", "variado", "tradiciones", "notedicen"):
             modo = arg.lower()
         elif arg.lower() in temas:
             tema = arg.lower()
@@ -1113,14 +1188,16 @@ async def cmd_lotegrande(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             horario = arg
         else:
             await update.message.reply_text(
-                "Uso: /lotegrande [cantidad] [0-9]       → polémica + tema viral (3:2), automático\n"
+                "Uso: /lotegrande [cantidad] [0-9]       → todos los formatos, uno de cada uno, automático\n"
+                "     /lotegrande 10 dia redes           → polémica + tema viral (3:2), automático\n"
+                "     /lotegrande 10 dia notedicen       → lo que no te dicen, automático\n"
                 "     /lotegrande 20 dia cercania [tema] → contradicción local, automático\n"
                 "     /lotegrande 15 0-9 cancun          → contradicción local, Claude de 0 a 9 h\n"
                 "     /lotegrande 15 variado             → el lote viejo de crimen + trivia (solo escribe)\n"
                 "     /lotegrande 10 dia tradiciones     → el porqué de las tradiciones (3D), automático\n"
                 f"Temas con la fórmula de cercanía: {', '.join(temas)}")
             return
-    if modo in ("redes", "tradiciones"):
+    if modo in ("todos", "redes", "tradiciones", "notedicen"):
         await _lotegrande_automatico(update, n, horario or "", None, formato=modo)
         return
     if modo == "variado":
@@ -1139,17 +1216,19 @@ async def cmd_lotegrande(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 # Las dos fórmulas de tema viral, y lo que el bot contesta al arrancar cada una.
-# Se eligen por la prueba del papel (17/10/2026): ¿existe un papel que, si
-# apareciera, cerraría la discusión? Sí -> "viral" (tres niveles). No, porque lo
-# que detonó todo es una opinión -> "polemica".
+# Se eligen por hecho u opinión (06/11/2026; antes, la prueba del papel): si lo
+# que detonó todo es un hecho -> "viral" (tres niveles), aunque ningún papel lo
+# cierre; si es una opinión -> "polemica".
 _FORMULAS_VIRALES = {
     "viral": {
         "comando": "temaviral", "titulo": "🔥 Tema viral", "ejemplo": "israel y yucatan",
         "busca": "tendencias de esta semana en redes",
         "lineas": ["• Fórmula de tres niveles: lo que se dice · lo que está en papel · lo que "
                    "nadie ha contestado. Intercalados, y el rumor regresa a la mitad.",
-                   "• Cada guion necesita documento oficial en pantalla y pasar el candado: si "
-                   "el dato propio no vale el video sin el rumor, el tema se descarta solo."]},
+                   "• Viral = una publicación con 500 mil vistas y 2 mil comentarios, o más de 5 "
+                   "cuentas hablando del tema, en español. Puede ser de otro país, sin ángulo "
+                   "mexicano. Y el candado: si lo verificable no vale el video sin el rumor, el "
+                   "tema se descarta solo."]},
     "polemica": {
         "comando": "polemica", "titulo": "🗣 Polémica", "ejemplo": "conalep bandidos del jale",
         "busca": "las polémicas de esta semana en redes",
@@ -1177,9 +1256,20 @@ _FORMULAS_VIRALES = {
                    "cuyo objeto existe en la biblioteca.",
                    "• Cada dato con fuente; el saber popular va atribuido (\"dicen que…\") y lo falso "
                    "no entra."]},
+    # Canal papasia (12/11/2026): OTRO canal, con su propio bot (@PapaPRIMEIABOT)
+    # y su propia voz. Arranca solo a mano, sin entrar al ciclo de /lotegrande.
+    "papasia": {
+        "comando": "papasia", "titulo": "👶 Papás primerizos", "ejemplo": "el hipo del bebé",
+        "busca": "las dudas de las primeras doce semanas que contesten las instituciones de salud",
+        "lineas": ["• Fórmula de 9 tiempos: la pregunta · la respuesta · es normal · los números · "
+                   "lo que te van a decir · cuándo ir al pediatra · lo que nunca se hace · cuándo pasa · "
+                   "no sustituye a tu pediatra.",
+                   "• Video 3D estilo juguete (bebé, cuna, biberón), voz Viral C.",
+                   "• Cada dato con liga a una institución (AAP, OMS, CDC, NHS, IMSS). Sin "
+                   "medicamentos, sin dosis, sin diagnósticos: eso lo rechaza la revisión sola."]},
 }
 _NOMBRE_FORMULA = {"polemica": "polémica", "viral": "tema viral", "comparativa": "comparativa",
-                   "tradiciones": "tradiciones"}
+                   "tradiciones": "tradiciones", "papasia": "papás primerizos"}
 
 
 async def _arrancar_viral(update: Update, context: ContextTypes.DEFAULT_TYPE,
@@ -1193,6 +1283,10 @@ async def _arrancar_viral(update: Update, context: ContextTypes.DEFAULT_TYPE,
 
     if not _authorized(update.effective_chat.id):
         await _reject_unauthorized(update)
+        return
+    if canal.de_formato(formato) != PERFIL:
+        await update.message.reply_text(
+            f"Eso es del canal {canal.nombre(canal.de_formato(formato))}: pídelo en su bot.")
         return
     f = _FORMULAS_VIRALES[formato]
     args = list(context.args or [])
@@ -1208,15 +1302,13 @@ async def _arrancar_viral(update: Update, context: ContextTypes.DEFAULT_TYPE,
             f"Sin tema, Claude busca: /{f['comando']} 5")
         return
     if activas := _fabricas_activas():
-        await update.message.reply_text(
-            "Ya hay una fábrica trabajando (comparten la voz, va una a la vez):\n"
-            + "\n".join(fabrica.resumen(e) for e in activas)
-            + "\n\nEspera a que termine o detenla con /pararfabrica.")
+        await update.message.reply_text(_aviso_ocupada(activas))
         return
     lote = f"{formato}-{datetime.now():%Y%m%d-%H%M}"
     estado = fabrica.crear(lote, n, formato, horas_claude="", tema=tema, **_DE_DOS_EN_DOS)
     pyw = Path(sys.executable).with_name("pythonw.exe")
-    subprocess.Popen([str(pyw if pyw.exists() else sys.executable), str(_FABRICA_CLI), "ciclo", lote],
+    subprocess.Popen([str(pyw if pyw.exists() else sys.executable), str(_FABRICA_CLI),
+                      *(["--perfil", PERFIL] if PERFIL else []), "ciclo", lote],
                      cwd=str(_FABRICA_CLI.parents[1]),
                      creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "DETACHED_PROCESS", 0))
     de_donde = tema if tema else "lo busca Claude (" + f["busca"] + ")"
@@ -1237,7 +1329,7 @@ async def cmd_temaviral(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     Estos videos no salen por /lotegrande: son los tres niveles (lo que se dice /
     lo que está en papel / lo que nadie ha contestado) y llevan su propia
-    revisión (candado anti-rumor, pieza 8, documento en pantalla). Como la
+    revisión (umbral de lo viral, candado anti-rumor, pieza 8). Como la
     fábrica automática: escribe Y genera sola, y cada video llega aquí.
     """
     await _arrancar_viral(update, context, "viral")
@@ -1249,10 +1341,10 @@ async def cmd_polemica(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     Uso: /polemica [cantidad] [tema...]   ·   /polemica 3 conalep bandidos del jale
          /polemica 3                      → Claude busca las polémicas él solo
 
-    Para los virales que detonó una OPINIÓN: ahí no hay papel que cierre la
-    discusión, así que el nivel 2 no es un documento sino la respuesta de los
-    afectados, medida, y el cierre le pide el veredicto a quien ve. La fórmula
-    hermana de /temaviral; se eligen por la prueba del papel.
+    Para los virales que detonó una OPINIÓN: una opinión no se verifica, así
+    que el nivel 2 no es un documento sino la respuesta de los afectados,
+    medida, y el cierre le pide el veredicto a quien ve. La fórmula hermana de
+    /temaviral; se eligen por hecho u opinión.
     """
     await _arrancar_viral(update, context, "polemica")
 
@@ -1276,6 +1368,19 @@ async def cmd_tradicion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await _arrancar_viral(update, context, "tradiciones")
 
 
+async def cmd_papasia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Lote del canal PAPASIA (12/11/2026), para papás y mamás primerizos: video 3D.
+
+    Uso: /papasia [cantidad] [tema...]   ·   /papasia 2 el hipo del bebé
+         /papasia 2                      → Claude escoge dudas de las primeras semanas
+
+    Es otro canal, con su propio bot de Telegram y su propia voz (Viral C). No
+    entra en /lotegrande: se pide a mano para no quitarle producción a Dato Mata
+    Gato hasta medir si el nicho funciona.
+    """
+    await _arrancar_viral(update, context, "papasia")
+
+
 # Tramo "cercania:<tema>" de /lotegrande (fórmula de la contradicción local).
 CERCANIA = "cercania:"
 
@@ -1293,17 +1398,30 @@ _FABRICA_CLI = Path(__file__).resolve().parents[2] / "tools" / "fabrica.py"
 def _fabricas_activas() -> list[dict]:
     from dato_mata_gato_bot import fabrica
 
-    if not fabrica.RAIZ.exists():
-        return []
-    activas = []
-    for d in sorted(fabrica.RAIZ.iterdir()):
-        try:
-            estado = fabrica.leer(d.name)
-        except (OSError, ValueError):
-            continue
-        if not estado.get("terminado"):
-            activas.append(estado)
-    return activas
+    return fabrica.activas_de_todos()
+
+
+def _fabricas_mias() -> list[dict]:
+    """Las fábricas activas de ESTE canal: lo que /fabrica enseña y lo que
+    /pararfabrica detiene. `_fabricas_activas` son las de los dos canales, y
+    solo sirve para no arrancar un lote mientras la máquina está ocupada."""
+    return [e for e in _fabricas_activas() if canal.es_mio(e)]
+
+
+def _aviso_ocupada(activas: list[dict]) -> str:
+    """Por qué no se puede arrancar otro lote, diciendo de quién es el que está."""
+    from dato_mata_gato_bot import fabrica
+
+    ajenas = [e for e in activas if not canal.es_mio(e)]
+    if ajenas and len(ajenas) == len(activas):
+        de_quien = canal.nombre(canal.de_estado(ajenas[0]))
+        return (f"La fábrica está ocupada con un lote del canal {de_quien} (los dos canales "
+                "comparten la voz y el render, va un lote a la vez):\n"
+                + "\n".join(fabrica.resumen(e) for e in ajenas)
+                + f"\n\nEspera a que termine, o detenlo desde el bot de {de_quien}.")
+    return ("Ya hay una fábrica trabajando (comparten la voz, va una a la vez):\n"
+            + "\n".join(fabrica.resumen(e) for e in activas)
+            + "\n\nEspera a que termine o detenla con /pararfabrica.")
 
 
 async def _lotegrande_automatico(update: Update, n: int, horario: str, tema: str | None,
@@ -1321,12 +1439,9 @@ async def _lotegrande_automatico(update: Update, n: int, horario: str, tema: str
         return
     activas = _fabricas_activas()
     if activas:
-        await update.message.reply_text(
-            "Ya hay una fábrica trabajando (comparten la voz, va una a la vez):\n"
-            + "\n".join(fabrica.resumen(e) for e in activas)
-            + "\n\nEspera a que termine o detenla con /pararfabrica.")
+        await update.message.reply_text(_aviso_ocupada(activas))
         return
-    lote = f"{formato if formato in ('redes', 'tradiciones') else 'auto'}-{datetime.now():%Y%m%d-%H%M}"
+    lote = f"{formato if formato in ('todos', 'redes', 'tradiciones', 'notedicen') else 'auto'}-{datetime.now():%Y%m%d-%H%M}"
     estado = fabrica.crear(lote, n, formato, horas_claude=horario, tema=tema,
                            vigencias=formato == "cercania", **_DE_DOS_EN_DOS)
     # La tarea de Windows la retoma cada 15 min; el primer ciclo arranca ya.
@@ -1334,6 +1449,24 @@ async def _lotegrande_automatico(update: Update, n: int, horario: str, tema: str
     subprocess.Popen([str(pyw if pyw.exists() else sys.executable), str(_FABRICA_CLI), "ciclo", lote],
                      cwd=str(_FABRICA_CLI.parents[1]),
                      creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "DETACHED_PROCESS", 0))
+    if formato == "todos":
+        orden = fabrica.repartir_todos(n, fabrica.conteo_formatos())
+        conteo: dict[str, int] = {}
+        for f in orden:
+            conteo[f] = conteo.get(f, 0) + 1
+        await update.message.reply_text(
+            f"🧪 Fábrica {lote} en marcha: {n} videos, todos los formatos (prueba de un mes).\n"
+            "• En este lote: " + ", ".join(fabrica.FORMATOS_TODOS[f][2] + (f" ×{k}" if k > 1 else "")
+                                          for f, k in conteo.items())
+            + ". El siguiente lote sigue la rotación donde quede este.\n"
+            "• Cada video llega con \"🧪 Formato: …\": publica la misma cantidad de cada uno, rotando, "
+            "a las mismas horas. Al final del mes se compara la mediana de vistas por formato.\n"
+            "• La serie sale una parte por turno, en orden: publícalas en ese orden.\n"
+            f"• De 2 en 2. Claude escribe {'todo el día' if not horario else f'solo de {horario} h'}, hasta "
+            f"{_VIDEOS_POR_VENTANA} guiones por ventana de 5 h. Generar todo toma ~{n * 45 / 60:.0f} h; "
+            f"se archiva en {estado['carpeta_videos']} sin publicar.\n"
+            "Estado: /fabrica · Detener: /pararfabrica")
+        return
     if formato == "redes":
         mezcla = fabrica.repartir_redes(n)
         await update.message.reply_text(
@@ -1381,9 +1514,14 @@ async def cmd_fabrica(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not _authorized(update.effective_chat.id):
         await _reject_unauthorized(update)
         return
-    activas = _fabricas_activas()
+    activas = _fabricas_mias()
     if not activas:
-        await update.message.reply_text("No hay ninguna fábrica trabajando. Arranca una con /lotegrande 20 dia")
+        arranca = "/papasia 2" if PERFIL == "papasia" else "/lotegrande 20 dia"
+        ajenas = _fabricas_activas()
+        otro = (f"\n(El canal {canal.nombre(canal.de_estado(ajenas[0]))} sí tiene una trabajando: "
+                "va un lote a la vez.)" if ajenas else "")
+        await update.message.reply_text(
+            f"No hay ninguna fábrica de este canal trabajando. Arranca una con {arranca}{otro}")
         return
     lineas = []
     for e in activas:
@@ -1405,9 +1543,9 @@ async def _decidir_ia_gratis(update: Update, decision: str, texto: str) -> None:
     if not _authorized(update.effective_chat.id):
         await _reject_unauthorized(update)
         return
-    activas = _fabricas_activas()
+    activas = _fabricas_mias()
     if not activas:
-        await update.message.reply_text("No hay ninguna fábrica trabajando.")
+        await update.message.reply_text("No hay ninguna fábrica de este canal trabajando.")
         return
     for e in activas:
         estado = fabrica.leer(e["lote"])
@@ -1440,9 +1578,9 @@ async def cmd_pararfabrica(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not _authorized(update.effective_chat.id):
         await _reject_unauthorized(update)
         return
-    activas = _fabricas_activas()
+    activas = _fabricas_mias()
     if not activas:
-        await update.message.reply_text("No hay ninguna fábrica trabajando.")
+        await update.message.reply_text("No hay ninguna fábrica de este canal trabajando.")
         return
     for e in activas:
         estado = fabrica.leer(e["lote"])
@@ -2764,6 +2902,9 @@ def main() -> None:
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
         raise SystemExit("Falta TELEGRAM_BOT_TOKEN en el .env")
+    # Con dos bots corriendo a la vez, el log tiene que decir cuál es cuál: el
+    # token NO se escribe, solo el id (lo de antes de los dos puntos).
+    logger.info("Bot del canal %s (id %s)", PERFIL or "dato-mata-gato", token.split(":")[0])
 
     if not ALLOWED_CHAT_IDS:
         logger.warning(
@@ -2782,11 +2923,25 @@ def main() -> None:
         )
 
     async def _post_init(app: Application) -> None:
-        await app.bot.set_my_commands(BOT_COMMANDS)
+        await app.bot.set_my_commands(BOT_COMMANDS_PAPASIA if PERFIL == "papasia" else BOT_COMMANDS)
 
     app = Application.builder().token(token).post_init(_post_init).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler(["ayuda", "help"], cmd_ayuda))
+    if PERFIL == "papasia":
+        # El bot de papasia (15/11/2026) solo tiene lo suyo: ni /lotegrande, ni
+        # guiones a mano, ni publicación. Lo demás es de Dato Mata Gato.
+        app.add_handler(CommandHandler("papasia", cmd_papasia))
+        app.add_handler(CommandHandler("fabrica", cmd_fabrica))
+        app.add_handler(CommandHandler("pararfabrica", cmd_pararfabrica))
+        app.add_handler(CommandHandler("iaclaude", cmd_iaclaude))
+        app.add_handler(CommandHandler("iaesperar", cmd_iaesperar))
+        app.add_handler(CommandHandler("estatus", cmd_estatus))
+        app.add_handler(CommandHandler("nuevo", cmd_nuevo))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
+        logger.info("Bot arrancado, escuchando Telegram (polling)...")
+        app.run_polling()
+        return
     app.add_handler(CommandHandler("nuevovideo", cmd_nuevovideo))
     app.add_handler(CommandHandler("generar", cmd_generar))
     app.add_handler(CommandHandler("estatus", cmd_estatus))

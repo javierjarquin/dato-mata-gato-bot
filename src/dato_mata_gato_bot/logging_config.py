@@ -1,8 +1,11 @@
 import logging
 from logging.handlers import RotatingFileHandler
-from pathlib import Path
 
-LOG_PATH = Path(__file__).resolve().parents[2] / "data" / "bot.log"
+from dato_mata_gato_bot import canal
+
+# Un log por canal (15/11/2026): `data/bot.log` y `data/papasia/bot.log`. Antes
+# los dos bots escribían en el mismo archivo y rotaban cada uno por su lado.
+LOG_PATH = canal.data_dir() / "bot.log"
 
 
 def setup_logging(level: str = "INFO") -> None:
@@ -15,6 +18,10 @@ def setup_logging(level: str = "INFO") -> None:
     root = logging.getLogger()
     root.setLevel(level)
     root.addHandler(file_handler)
+
+    # httpx escribe en INFO cada consulta a Telegram con la URL completa, y la
+    # URL trae el TOKEN del bot: quedaba en claro en el log cada 10 segundos.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
     # Con pythonw.exe no hay consola; agregar el StreamHandler igual no
     # estorba cuando SÍ corre con consola (ej. durante desarrollo).

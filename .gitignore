@@ -8,6 +8,11 @@ dist/
 venv/
 
 .env
+# Los perfiles de canal (.env.papasia) y los respaldos (.env.bak-*) traen los
+# mismos tokens y API keys que el .env: solo .env estaba ignorado, así que un
+# "git add ." los subía (12/11/2026).
+.env.*
+!.env.example
 data/
 *.log
 credentials/

@@ -58,11 +58,13 @@ def carpeta_de_sesiones(cwd: str = CWD):
 
 def run_turn(session_id: str, message: str, is_new_session: bool, ligera: bool = False,
              recortada: bool = False, herramientas: str | None = None,
-             sistema: str | None = None) -> ClaudeTurnResult:
+             sistema: str | None = None, modelo: str | None = None,
+             effort: str | None = None) -> ClaudeTurnResult:
     """`herramientas` cambia las de la sesión ligera ("" = ninguna) y `sistema`
     su system prompt: para un paso que solo contesta JSON (las escenas 3D,
     12/11/2026) el de Claude Code y sus herramientas son ~8k tokens por turno
-    que no se usan."""
+    que no se usan. `modelo` y `effort` cambian los de la sesión ligera para
+    quien lleva los suyos (papasia en un turno, 15/11/2026)."""
     # El prompt va por STDIN, no como argumento (16/10/2026). Windows corta la
     # línea de comandos en 32 767 caracteres y CreateProcess falla con
     # "WinError 206: el nombre del archivo o la extensión es demasiado largo".
@@ -82,10 +84,10 @@ def run_turn(session_id: str, message: str, is_new_session: bool, ligera: bool =
         args += ["--tools", HERRAMIENTAS_LIGERAS if herramientas is None else herramientas, "--strict-mcp-config"]
         if sistema:
             args += ["--system-prompt", sistema]
-        if EFFORT_ESCRITURA:
-            args += ["--effort", EFFORT_ESCRITURA]
-        if MODELO_ESCRITURA:
-            args += ["--model", MODELO_ESCRITURA]
+        if effort or EFFORT_ESCRITURA:
+            args += ["--effort", effort or EFFORT_ESCRITURA]
+        if modelo or MODELO_ESCRITURA:
+            args += ["--model", modelo or MODELO_ESCRITURA]
     elif recortada:
         args += ["--tools", HERRAMIENTAS_RECORTADAS, "--strict-mcp-config"]
     args += (["--session-id", session_id] if is_new_session else ["--resume", session_id])
