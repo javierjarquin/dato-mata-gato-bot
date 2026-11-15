@@ -157,8 +157,9 @@ def test_tanda_redes_llama_a_las_dos_formulas(monkeypatch):
     assert pedidos == [("polemica", 2), ("viral", 2), ("comparativa", 1)]
 
 
-def test_lotegrande_solo_con_cantidad_es_redes(tmp_path, monkeypatch):
-    """20/10/2026: Javier mandó "/lotegrande 10" y le salió el lote viejo."""
+def test_lotegrande_con_redes_es_redes(tmp_path, monkeypatch):
+    """20/10/2026: Javier mandó "/lotegrande 10" y le salió el lote viejo. Desde el
+    06/11 el default es "todos"; las redes van con "redes"."""
     monkeypatch.setattr(fabrica, "RAIZ", tmp_path)
     monkeypatch.setattr(bot, "_authorized", lambda chat: True)
     import subprocess
@@ -170,7 +171,27 @@ def test_lotegrande_solo_con_cantidad_es_redes(tmp_path, monkeypatch):
 
     update = SimpleNamespace(effective_chat=SimpleNamespace(id=1),
                              message=SimpleNamespace(reply_text=responder))
-    asyncio.run(bot.cmd_lotegrande(update, SimpleNamespace(args=["10"])))
+    asyncio.run(bot.cmd_lotegrande(update, SimpleNamespace(args=["10", "redes"])))
     e = json.loads(next(tmp_path.glob("redes-*/estado.json")).read_text(encoding="utf-8"))
     assert (e["formato"], e["objetivo"], e["horas_claude"]) == ("redes", 10, "")
     assert "5 polémica + 3 tema viral + 2 comparativa" in respuestas[0]
+
+
+def test_lotegrande_solo_con_cantidad_es_todos(tmp_path, monkeypatch):
+    """06/11/2026, Javier: "el lote grande tiene que generar cualquiera de los
+    formatos que tenemos, no solo de noticias... si te pido 5 es uno de cada formato"."""
+    monkeypatch.setattr(fabrica, "RAIZ", tmp_path)
+    monkeypatch.setattr(bot, "_authorized", lambda chat: True)
+    import subprocess
+    monkeypatch.setattr(subprocess, "Popen", lambda args, **k: None)
+    respuestas = []
+
+    async def responder(texto, **_):
+        respuestas.append(texto)
+
+    update = SimpleNamespace(effective_chat=SimpleNamespace(id=1),
+                             message=SimpleNamespace(reply_text=responder))
+    asyncio.run(bot.cmd_lotegrande(update, SimpleNamespace(args=["5"])))
+    e = json.loads(next(tmp_path.glob("todos-*/estado.json")).read_text(encoding="utf-8"))
+    assert (e["formato"], e["objetivo"]) == ("todos", 5)
+    assert "×" not in respuestas[0] and "lo que no te dicen" in respuestas[0]

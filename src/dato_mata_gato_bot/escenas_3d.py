@@ -134,11 +134,11 @@ def pedir_claude_json(slug: str, guion: dict, progreso=None) -> Escenas:
 
 
 def usa_escenas(slug: str) -> bool:
-    """¿Este video va con escenas 3D? Solo los que hoy usan el render plus; el
-    nicho de tradiciones tiene su propio 3D y no pasa por aquí."""
+    """¿Este video va con escenas 3D? Solo los que hoy usan el render plus; los
+    nichos que ya son 3D (tradiciones, papasia) traen el suyo y no pasan por aquí."""
     from dato_mata_gato_bot import pipeline
 
-    if not activas() or pipeline.es_tradicion(slug):
+    if not activas() or pipeline.formato_3d(slug):
         return False
     try:
         guion = json.loads((pipeline.ANDROID_IN / slug / "guion.json").read_text(encoding="utf-8"))

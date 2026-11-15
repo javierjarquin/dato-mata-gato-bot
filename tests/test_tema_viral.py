@@ -18,6 +18,9 @@ def _base() -> dict:
             "condiciones": {c: "x" for c in instruccion_viral.CONDICIONES},
             "senalados": ["MINISO", "COPRED"],
             "hallado_en": "TikTok, @max_cintio, 2.5 millones de vistas, 06/10/2026",
+            "umbral": {"publicacion": {"url": "https://www.tiktok.com/@max_cintio/video/1",
+                                       "vistas": "2.5 millones", "comentarios": 8000,
+                                       "idioma": "es"}},
             "fuentes": {"infobae_miniso": "https://www.infobae.com/mexico/2026/10/07/x/",
                         "copred_edis": "https://copred.cdmx.gob.mx/nota/x"},
             "verificacion_final": {
@@ -27,7 +30,8 @@ def _base() -> dict:
                 "misma_historia": "Arranca en la tienda y p03 a p07 contestan qué le pasa.",
                 "corregido": "nada"},
         },
-        "evidencia": [{"tipo": "documento"}, {"tipo": "video_red"}],
+        "evidencia": [{"tipo": "documento"},
+                      {"tipo": "video_red", "url": "https://www.tiktok.com/@max_cintio/video/1"}],
         "plus": {"sin_nota_animada": ["p00", "p01", "p02"]},
         "planos": [
             {"id": "p00", "narracion": "Dos millones y medio vieron al gerente de MINISO."},
@@ -82,9 +86,10 @@ def test_las_nueve_piezas_y_el_candado():
     del sin_fama["_schema"]["condiciones"]["8_por_que_se_cree"]
     assert "8_por_que_se_cree" in " ".join(instruccion_viral.problemas(sin_fama))
 
+    # El documento ya no es obligatorio (06/11/2026): la discusión puede quedar abierta.
     sin_doc = json.loads(json.dumps(base))
-    sin_doc["evidencia"] = [{"tipo": "prensa"}, {"tipo": "video_red"}]
-    assert "documento" in " ".join(instruccion_viral.problemas(sin_doc))
+    sin_doc["evidencia"] = [{"tipo": "prensa"}, base["evidencia"][1]]
+    assert instruccion_viral.problemas(sin_doc) == []
 
     # El tema nació en redes: hay que enseñarlo, no contarlo de oídas.
     sin_redes = json.loads(json.dumps(base))
@@ -155,8 +160,101 @@ def test_el_candado_pide_que_sea_sobre_lo_mismo():
 
 def test_el_umbral_mide_el_fenomeno_no_que_exista_la_nota():
     sin = instruccion_viral.instruccion(3, None, "-")
-    assert "EL UMBRAL" in sin and "DOS de estas señales" in sin
+    assert "EL UMBRAL" in sin and "500 mil vistas Y 2 mil comentarios" in sin
+    assert "MÁS DE CINCO CUENTAS" in sin
     assert "tres portales locales NO es un fenómeno" in sin
+    # Salieron dos señales (06/11/2026): que lo bajaran y que respondiera una autoridad.
+    umbral = sin.split("EL UMBRAL")[1].split("¿HECHO U OPINIÓN?")[0]
+    assert "bajado o restringido" not in umbral and "respuesta de una autoridad" not in umbral
+
+
+def test_viral_tiene_numero():
+    """06/11/2026, Javier: viral = una publicación con 500 mil vistas y 2 mil
+    comentarios, o más de cinco cuentas hablando del tema. Antes pasó un tema
+    con un clip de 3,083 vistas (el croquis de Veracruz)."""
+    base = _base()
+
+    chico = json.loads(json.dumps(base))
+    chico["_schema"]["umbral"]["publicacion"].update(vistas="420 mil", comentarios=9000)
+    assert "420,000 vistas" in " ".join(instruccion_viral.problemas(chico))
+
+    pocos_comentarios = json.loads(json.dumps(base))
+    pocos_comentarios["_schema"]["umbral"]["publicacion"]["comentarios"] = "1,500"
+    assert "1,500 comentarios" in " ".join(instruccion_viral.problemas(pocos_comentarios))
+
+    # La publicación del umbral tiene que ir en la evidencia: así se miden sus números reales.
+    suelta = json.loads(json.dumps(base))
+    suelta["_schema"]["umbral"]["publicacion"]["url"] = "https://www.tiktok.com/@otra/video/2"
+    assert "no está en" in " ".join(instruccion_viral.problemas(suelta))
+
+    sin = json.loads(json.dumps(base))
+    del sin["_schema"]["umbral"]
+    assert "_schema.umbral" in " ".join(instruccion_viral.problemas(sin))
+
+    # La segunda opción: más de cinco cuentas distintas, cada una con su URL.
+    cuentas = json.loads(json.dumps(base))
+    lista = [{"cuenta": f"@c{i}", "url": f"https://www.tiktok.com/@c{i}/video/{i}", "idioma": "es"}
+             for i in range(6)]
+    cuentas["_schema"]["umbral"] = {"cuentas": lista}
+    assert instruccion_viral.problemas(cuentas) == []
+    cuentas["_schema"]["umbral"] = {"cuentas": lista[:5]}
+    assert "5 cuentas distintas" in " ".join(instruccion_viral.problemas(cuentas))
+    # La misma cuenta dos veces no cuenta doble, y un portal no es una red.
+    repetidas = lista[:5] + [{"cuenta": "@c0", "url": "https://www.tiktok.com/@c0/video/9"},
+                             {"cuenta": "Infobae", "url": "https://www.infobae.com/x"}]
+    cuentas["_schema"]["umbral"] = {"cuentas": repetidas}
+    assert "5 cuentas distintas" in " ".join(instruccion_viral.problemas(cuentas))
+
+
+def test_el_umbral_real_sale_del_clip_bajado():
+    """Lo que escribe Claude se compara con lo que dio yt-dlp o la captura."""
+    guion = _base()
+    url = "https://www.tiktok.com/@max_cintio/video/1"
+    real = {"r1": {"tipo": "video_red", "fuente": url, "vistas": 2_480_000, "comentarios": 7900}}
+    assert instruccion_viral.umbral_real(guion, real).startswith("umbral real: 2,480,000 vistas")
+    bajo = {"r1": {"tipo": "video_red", "fuente": url, "vistas": 3083, "comentarios": 12}}
+    assert "NO se cumple" in instruccion_viral.umbral_real(guion, bajo)
+    captura = {"r1": {"tipo": "red_social", "fuente": url,
+                      "numeros": ["671.2K vistas", "3,710 comentarios"]}}
+    assert instruccion_viral.umbral_real(guion, captura) == "umbral real: 671,200 vistas, 3,710 comentarios"
+    assert "no se pudo bajar" in instruccion_viral.umbral_real(guion, {})
+    guion["_schema"]["umbral"] = {"cuentas": []}
+    assert instruccion_viral.umbral_real(guion, real) == ""
+
+
+def test_lo_de_otro_pais_entra_si_es_viral_en_espanol():
+    """06/11/2026, Javier: la guerra o el robo de banco en Paraguay sí entran, sin
+    ángulo mexicano, pero el umbral se cuenta en publicaciones en español."""
+    texto = instruccion_viral.instruccion(3, None, "")
+    assert "TEMAS DE OTRO PAÍS" in texto and "EN ESPAÑOL" in texto
+    # La publicación en otro idioma no cuenta.
+    ingles = _base()
+    ingles["_schema"]["umbral"]["publicacion"]["idioma"] = "en"
+    assert "idioma" in " ".join(instruccion_viral.problemas(ingles))
+    # Las cuentas en otro idioma no suman.
+    cuentas = _base()
+    lista = [{"cuenta": f"@c{i}", "url": f"https://www.tiktok.com/@c{i}/video/{i}",
+              "idioma": "es" if i < 5 else "en"} for i in range(7)]
+    cuentas["_schema"]["umbral"] = {"cuentas": lista}
+    assert "5 cuentas distintas en español" in " ".join(instruccion_viral.problemas(cuentas))
+    # El título real del clip avisa si no está en español.
+    url = "https://www.tiktok.com/@max_cintio/video/1"
+    en = {"r1": {"fuente": url, "vistas": 900_000, "comentarios": 5000,
+                 "titulo": "This is the moment the bank in Asuncion was robbed and the police"}}
+    assert "no parece estar en español" in instruccion_viral.umbral_real(_base(), en)
+    es = {"r1": {"fuente": url, "vistas": 900_000, "comentarios": 5000,
+                 "titulo": "Así fue el robo al banco en Asunción y la policía no dice nada"}}
+    assert "no parece" not in instruccion_viral.umbral_real(_base(), es)
+
+
+def test_el_expediente_deja_pasar_lo_de_otro_pais_solo_en_viral():
+    from dato_mata_gato_bot import expediente
+
+    assert expediente.es_oficial("https://www.ministeriopublico.gov.py/nota", mundo=True)
+    assert not expediente.es_oficial("https://www.ministeriopublico.gov.py/nota")
+    assert not expediente.es_oficial("https://gobierno.com/x", mundo=True)
+    assert any("México" not in c for c in expediente.FORMULAS["viral"][0])
+    assert all("México" in c for c in expediente.FORMULAS["polemica"][0])
 
 
 def test_el_nivel_3_cierra_abriendo():
