@@ -53,6 +53,9 @@ AJUSTES_TIKTOK = {
     "allowStitch": False,
     "videoMadeWithAi": True,
     "commercialContentType": "none",
+    # La portada de Papás con IA va pegada en el primer cuadro (pipeline,
+    # 22/11/2026); sin esto TikTok toma el cuadro del segundo 1.
+    "videoCoverTimestampMs": 0,
     "contentPreviewConfirmed": True,
     "expressConsentGiven": True,
 }

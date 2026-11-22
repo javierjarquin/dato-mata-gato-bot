@@ -1363,7 +1363,8 @@ def video(lote: str, slug: str) -> None:
         pegada = pipeline.variante_portada(slug)
         telegram_fotos([(proyecto / f"portada_{v}.jpg",
                          "Portada"
-                         + (" (ya va en el primer cuadro)" if v == pegada else "")) for v in ("nota", "dato", "gancho")])
+                         + (" (ya va en el primer cuadro)" if v == pegada else ""))
+                        for v in ("nota", "dato", "gancho", "papasia")])
         limpiar(slug, liviano)
     print("RESULTADO " + json.dumps({"ok": r.ok, "mensaje": r.mensaje[-1500:]}, ensure_ascii=False),
           flush=True)
