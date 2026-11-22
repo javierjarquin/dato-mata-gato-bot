@@ -25,6 +25,7 @@ from dato_mata_gato_bot import (
     drive_upload,
     evidencia,
     media_check,
+    verificar_datos,
     publish_schedule,
     quiz_cards,
     sessions,
@@ -1394,6 +1395,11 @@ def run(slug: str, voz: str, chat_id: int | None = None,
         progreso("armando la evidencia real")
         reporte = evidencia.preparar(slug)
         aviso_evidencia = reporte.resumen()
+        # Cada número, nombre y cita contra el texto de sus fuentes (22/11/2026).
+        # No frena el video: lo que no aparece va al aviso, para revisarlo antes
+        # de publicar.
+        progreso("comprobando los datos contra las fuentes")
+        aviso_evidencia = "\n".join(x for x in (aviso_evidencia, verificar_datos.aviso(slug)) if x)
         if slug.startswith("guion-viral-"):
             aviso_evidencia = "\n".join(x for x in (aviso_evidencia, _umbral_viral(slug)) if x)
         if reporte.reales == 0:
