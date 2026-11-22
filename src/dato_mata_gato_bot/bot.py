@@ -1845,6 +1845,25 @@ class LimiteDeClaude(Exception):
     intento falla en dos segundos hasta la hora que dice el mensaje."""
 
 
+class ClaudeDesactualizado(LimiteDeClaude):
+    """El CLI de Claude quedó viejo para el modelo (19/11/2026). Hereda de
+    LimiteDeClaude para que todo lo que ya guarda lo escrito y deja de pedir
+    lo maneje igual; la fábrica lo distingue para avisar con el arreglo
+    (`claude update`) en vez de decir "esperando la cuota"."""
+
+
+def error_que_para(texto: str) -> LimiteDeClaude | None:
+    """La excepción que corresponde a un error de Claude que no se arregla
+    reintentando, o None si vale la pena seguir."""
+    from dato_mata_gato_bot.claude_runner import es_cli_desactualizado
+
+    if es_cli_desactualizado(texto):
+        return ClaudeDesactualizado(texto)
+    if es_limite_de_uso(texto):
+        return LimiteDeClaude(texto)
+    return None
+
+
 def _sesion_nueva() -> tuple[str, bool]:
     """Una conversación nueva con Claude, para trabajo que no necesita memoria.
 
@@ -1923,8 +1942,8 @@ async def _guiones_de_crimen(
     result = await asyncio.to_thread(run_turn, session_id, instruccion, is_new, False, _sesion_recortada())
     if not result.ok:
         logger.error("Tramo %s falló: %s", desc, result.text[:2000])
-        if es_limite_de_uso(result.text):
-            raise LimiteDeClaude(result.text)
+        if (exc := error_que_para(result.text)):
+            raise exc
         await update.message.reply_text(f"Falló el tramo {desc}: {result.text}")
         return []
     guiones = _parse_lote_response(result.text)
@@ -1980,8 +1999,8 @@ async def _revisar_guiones_crimen(update: Update, session_id: str, guiones: list
         corregidos = _parse_lote_response(result.text)
         if corregidos:
             guiones = corregidos
-    elif es_limite_de_uso(result.text):
-        raise LimiteDeClaude(result.text)
+    elif (exc := error_que_para(result.text)):
+        raise exc
     buenos, fuera = [], {}
     for g in guiones:
         p = _problemas_de(g.get("slug", ""))

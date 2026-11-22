@@ -36,7 +36,7 @@ from pathlib import Path
 
 import requests
 
-from dato_mata_gato_bot import canal, expediente, formatos, lote_grande, pipeline
+from dato_mata_gato_bot import canal, claude_runner, expediente, formatos, lote_grande, pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -518,7 +518,7 @@ async def _escribir_y_rescatar(avisador, nombre: str, texto: str, cantidad: int,
     Si se acaba la cuota, LimiteDeClaude lleva en `.slugs` lo que sí pasó.
     Devuelve (guiones buenos, sesiones usadas)."""
     from dato_mata_gato_bot import bot
-    from dato_mata_gato_bot.claude_runner import es_limite_de_uso, run_turn
+    from dato_mata_gato_bot.claude_runner import run_turn
 
     session_id, _ = bot._sesion_nueva()
     desde = time.time() - 5
@@ -534,8 +534,7 @@ async def _escribir_y_rescatar(avisador, nombre: str, texto: str, cantidad: int,
         revision = {s: revisar(s) for s in slugs}
         buenos = [s for s, p in revision.items() if not p]
         fallas = {s: p for s, p in revision.items() if p}
-        if not r.ok and es_limite_de_uso(r.text):
-            exc = bot.LimiteDeClaude(r.text)
+        if not r.ok and (exc := bot.error_que_para(r.text)):
             exc.slugs = buenos
             raise exc
         sin_tema = cantidad - len(buenos) - len(fallas)
@@ -733,14 +732,15 @@ async def _guiones_papasia(avisador, tema: str | None, cantidad: int,
     IA gratis sin cuota, lo regresan a la sesión con herramientas de antes."""
     import httpx
 
-    from dato_mata_gato_bot import bot, ia_gratis, instruccion_papasia, papasia_guion
+    from dato_mata_gato_bot import bot, claude_runner, ia_gratis, instruccion_papasia, papasia_guion
 
     ligera = sesion_ligera() if ligera is None else ligera
     ya = bot._ya_cubiertos("guion-papasia-")
     if (os.getenv("PAPASIA_UN_TURNO") or "1").strip() != "0":
         try:
             hechos, limite = await asyncio.to_thread(
-                papasia_guion.lote, tema, cantidad, ya, tokens_de_sesiones, telegram)
+                papasia_guion.lote, tema, cantidad, ya, tokens_de_sesiones, telegram,
+                claude_runner.hay_que_parar)
         except (ia_gratis.SinIA, httpx.HTTPError) as exc:
             logger.warning("papasia: sin expediente (%s); escribe la sesión con herramientas", exc)
             telegram(f"🔎 papasia: no pude armar el expediente sin Claude ({str(exc)[:120]}); "
@@ -751,7 +751,7 @@ async def _guiones_papasia(avisador, tema: str | None, cantidad: int,
                 + "\n".join(papasia_guion.renglon(g) for g in hechos))
             buenos = [{"slug": g.slug, "vigencia": "perenne"} for g in hechos if g.paso]
             if limite:
-                exc = bot.LimiteDeClaude(limite)
+                exc = bot.error_que_para(limite) or bot.LimiteDeClaude(limite)
                 exc.slugs = [g["slug"] for g in buenos]
                 raise exc
             return buenos, [g.sesion for g in hechos]
@@ -1389,7 +1389,21 @@ def _ciclo(lote: str) -> str:
                  "pedidos": estado["guiones_pedidos"] - antes, **gasto,
                  **({"cortada": True} if limite else {})})
             estado["cuota_libre_desde"] = None
-            if limite:
+            estado["claude_desactualizado"] = bool(limite and claude_runner.es_cli_desactualizado(limite))
+            if estado["claude_desactualizado"]:
+                # No es la cuota (19/11/2026): esperar no lo arregla. Se reintenta
+                # cada ESPERA_CUOTA por si ya se actualizó, y se avisa una vez por
+                # hora con el arreglo, no "retomo a las HH:MM".
+                libre = datetime.now() + timedelta(seconds=ESPERA_CUOTA)
+                estado["cuota_libre_desde"] = libre.isoformat(timespec="minutes")
+                if time.time() - estado.get("ultimo_aviso_cli", 0) > AVISO_INFRA_CADA:
+                    estado["ultimo_aviso_cli"] = time.time()
+                    telegram(f"🛠️ Fábrica {lote}: el CLI de Claude quedó viejo para el modelo y no "
+                             f"puede escribir guiones:\n{limite[-300:]}\n"
+                             "Arreglo: en una terminal, `claude update` (y que el PATH apunte a "
+                             r"C:\Users\jarqu\.local\bin). Sigo renderizando lo que hay y reintento "
+                             f"cada {ESPERA_CUOTA // 60} min.")
+            elif limite:
                 libre = hora_de_reset(limite, datetime.now())
                 estado["cuota_libre_desde"] = libre.isoformat(timespec="minutes")
                 telegram(f"⏸️ Fábrica {lote}: se acabó la cuota de Claude. Sigo renderizando "
@@ -1417,6 +1431,8 @@ def _ciclo(lote: str) -> str:
                 guardar(lote, estado)
                 telegram(f"✅ Fábrica {lote} terminada.\n{resumen(estado)}")
                 return "terminado"
+            if estado.get("claude_desactualizado"):
+                return "el CLI de Claude está desactualizado (claude update)"
             return freno or "esperando la cuota de Claude para escribir más guiones"
 
         slug = fila[0]
