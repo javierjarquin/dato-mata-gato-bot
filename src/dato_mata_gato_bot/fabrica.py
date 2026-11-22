@@ -1461,6 +1461,26 @@ def ciclo(lote: str) -> str:
         _ruta_latido(lote).unlink(missing_ok=True)
 
 
+_PROGRAMAR_ZERNIO = Path(__file__).resolve().parents[2] / "tools" / "programar_zernio.py"
+
+
+def subir_a_zernio() -> None:
+    """Si el canal tiene calendario de Zernio, el video recién hecho se sube YA
+    (22/11/2026, Javier: los del día del comando salen "apenas termine el
+    video"), sin esperar la vuelta de 15 min del vigilante. Corre aparte, para
+    no frenar el siguiente video; si alguien más está subiendo, espera turno."""
+    if not (canal.entrada() / "zernio_calendario.json").exists():
+        return
+    py = Path(sys.executable).with_name("python.exe")
+    try:
+        subprocess.Popen([str(py if py.exists() else sys.executable), str(_PROGRAMAR_ZERNIO),
+                          "--canal", canal.actual() or "datomatagato", "--confirmar", "--esperar"],
+                         cwd=str(_PROGRAMAR_ZERNIO.parents[1]), stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, creationflags=_SIN_VENTANA)
+    except OSError:
+        logger.exception("no pude lanzar programar_zernio")
+
+
 def _avisar_pausa(lote: str, estado: dict, problema: str) -> str:
     if time.time() - estado["ultimo_aviso_infra"] > AVISO_INFRA_CADA:
         telegram(f"⚠️ Fábrica {lote} en pausa: {problema}\nLo reintento cada 15 minutos.")
@@ -1559,6 +1579,8 @@ def _ciclo(lote: str) -> str:
         v["estado"] = "listo" if ok else "fallido"
         v["error"] = "" if ok else mensaje[-500:]
         guardar(lote, estado)
+        if ok:
+            subir_a_zernio()
         if not ok:
             otra = "lo reintento al final de la fila" if v["intentos"] < MAX_INTENTOS else "queda fuera"
             telegram(f"⚠️ {slug} falló ({otra}):\n{mensaje[-500:]}")

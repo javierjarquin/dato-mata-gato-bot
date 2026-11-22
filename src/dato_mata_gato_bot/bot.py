@@ -1476,16 +1476,22 @@ def _lanzar_publicacion(update: Update, lote: str, n: int, dias: int) -> None:
             cal = json.loads((canal.entrada(PERFIL) / "zernio_calendario.json").read_text(encoding="utf-8"))
             por_dia: dict[str, list[str]] = {}
             for l in cal["lugares"]:
-                por_dia.setdefault(l["fecha"][:10], []).append(l["fecha"][11:16])
+                por_dia.setdefault(l["fecha"][:10], []).append(
+                    "al terminar" if l.get("al_terminar") else l["fecha"][11:16])
             lineas = []
+            hoy = datetime.now().date()
             for dia, horas in por_dia.items():
                 d = datetime.fromisoformat(dia)
-                lineas.append(f"  {_DIAS_SEMANA[d.weekday()]} {d:%d/%m}: {len(horas)} → {' · '.join(horas)}")
+                nombre = "hoy" if d.date() == hoy else f"{_DIAS_SEMANA[d.weekday()]} {d:%d/%m}"
+                cuando = ("cada uno en cuanto termina" if horas and horas[0] == "al terminar"
+                          else " · ".join(horas))
+                lineas.append(f"  {nombre}: {len(horas)} → {cuando}")
             await update.message.reply_text(
                 f"📅 Publicación en TikTok ({canal.nombre(PERFIL)}): {n} videos en {dias} días\n"
                 + "\n".join(lineas) + "\n"
-                "Cada video se sube a Zernio en cuanto se genera y sale a su hora (hora de México). "
-                "Si un lugar llega antes que su video, se recorre al final a la misma hora.")
+                "Los de hoy se publican en cuanto sale cada video; los demás se suben a Zernio al "
+                "generarse y salen a su hora (hora de México). Si un lugar llega antes que su "
+                "video, se recorre al final.")
         except Exception as e:  # noqa: BLE001
             logger.exception("calendario de Zernio para %s", lote)
             await update.message.reply_text(

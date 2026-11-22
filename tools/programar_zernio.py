@@ -18,9 +18,11 @@ alcanzan, los lugares quedan libres y se llenan al volver a correr; los que ya
 pasaron se saltan.
 
 --lote L (lo usan /lotegrande N D y /papasia N D desde Telegram): el calendario
-solo toma los videos de lotes\\L, cada uno en cuanto la fábrica lo genera. Si un
-lugar pasa sin video (todavía no se generaba), se repone al final a la misma
-hora, para que salgan los N.
+solo toma los videos de lotes\\L y empieza HOY. Los del primer día se publican
+en cuanto cada video termina (publishNow; la fábrica llama a este script al
+acabar cada video); los de los días siguientes van programados a su hora. Si un
+lugar pasa sin video (todavía no se generaba), se repone al final, para que
+salgan los N.
 
 --ya-publicado <video> marca como publicado ese video y todos los anteriores
 (lo que se subió a mano antes de Zernio).
@@ -156,9 +158,15 @@ def horas_del_dia(cuantos: int, ventana: tuple[int, int], fijas: list[str] | Non
     return salida
 
 
-def armar_calendario(videos: int, dias: int, desde: date, ventana, fijas) -> list[dict]:
+def armar_calendario(videos: int, dias: int, desde: date, ventana, fijas,
+                     primer_dia_al_terminar: bool = False) -> list[dict]:
     """10 en 3 días = 3, 3 y 4: lo que sobra va en los ÚLTIMOS días (Javier,
-    22/11/2026), que es cuando ya hay más videos generados."""
+    22/11/2026), que es cuando ya hay más videos generados.
+
+    `primer_dia_al_terminar` (lo que manda el bot, 22/11/2026, Javier: "los que
+    se generan hoy, apenas termine el video; el resto sí programados"): los
+    lugares del primer día no tienen hora, se publican en cuanto el video
+    sale. Valen hasta las 23:59 de ese día."""
     base, sobra = divmod(videos, dias)
     lugares = []
     for d in range(dias):
@@ -166,9 +174,20 @@ def armar_calendario(videos: int, dias: int, desde: date, ventana, fijas) -> lis
         if not cuantos:
             continue
         dia = desde + timedelta(days=d)
+        if d == 0 and primer_dia_al_terminar:
+            lugares += [{"fecha": f"{dia.isoformat()}T23:59:00", "al_terminar": True,
+                         "video": None, "postId": None} for _ in range(cuantos)]
+            continue
         for h in horas_del_dia(cuantos, ventana, fijas):
             lugares.append({"fecha": f"{dia.isoformat()}T{h}:00", "video": None, "postId": None})
     return lugares
+
+
+def vencido(lugar: dict, ahora: datetime) -> bool:
+    """¿Ya no se puede llenar? Uno programado necesita 15 min de margen en
+    Zernio; uno "al terminar" vale hasta que se acaba su día."""
+    margen = timedelta() if lugar.get("al_terminar") else timedelta(minutes=15)
+    return datetime.fromisoformat(lugar["fecha"]) <= ahora + margen
 
 
 def primer_dia_libre(cal: dict | None, ahora: datetime) -> date:
@@ -187,12 +206,16 @@ def reponer_vencidos(cal: dict, ahora: datetime) -> int:
     lo generaba), se repone al final, a la misma hora del día siguiente al
     último lugar. Así los N videos del lote salen todos; nunca se pierde uno."""
     repuestos = 0
-    for l in cal["lugares"]:
-        if l["video"] or l.get("vencido") or datetime.fromisoformat(l["fecha"]) > ahora + timedelta(minutes=15):
+    con_hora = [datetime.fromisoformat(x["fecha"]).time() for x in cal["lugares"] if not x.get("al_terminar")]
+    for l in list(cal["lugares"]):
+        if l["video"] or l.get("vencido") or not vencido(l, ahora):
             continue
         l["vencido"] = True
         ultimo = max(datetime.fromisoformat(x["fecha"]) for x in cal["lugares"])
-        hora = datetime.fromisoformat(l["fecha"]).time()
+        # Uno "al terminar" que se quedó sin video se repone con hora: la más
+        # temprana del calendario (o las 16:00 si todo era del primer día).
+        hora = (min(con_hora) if con_hora else datetime.strptime("16:00", "%H:%M").time()) \
+            if l.get("al_terminar") else datetime.fromisoformat(l["fecha"]).time()
         nuevo = datetime.combine(ultimo.date() + (timedelta(days=1) if hora <= ultimo.time() else timedelta()), hora)
         cal["lugares"].append({"fecha": nuevo.isoformat(timespec="seconds"), "video": None, "postId": None})
         repuestos += 1
@@ -298,17 +321,17 @@ class Zernio:
             pass
         return pre["publicUrl"]
 
-    def cuerpo(self, url: str, texto: str, fecha: str) -> dict:
+    def cuerpo(self, url: str, texto: str, fecha: str | None) -> dict:
+        """Sin fecha se publica ya (publishNow)."""
         return {
             "content": texto,
             "mediaItems": [{"type": "video", "url": url}],
             "platforms": [{"platform": "tiktok", "accountId": self.cuenta}],
-            "scheduledFor": fecha,
-            "timezone": ZONA,
+            **({"scheduledFor": fecha, "timezone": ZONA} if fecha else {"publishNow": True}),
             "tiktokSettings": self.ajustes,
         }
 
-    def programar(self, url: str, texto: str, fecha: str) -> str:
+    def programar(self, url: str, texto: str, fecha: str | None) -> str:
         st, resp = self.llamar("POST", "/posts", self.cuerpo(url, texto, fecha))
         if st not in (200, 201) or not isinstance(resp, dict):
             raise RuntimeError(f"crear post {st}: {resp}")
@@ -336,6 +359,8 @@ def main() -> None:
     ap.add_argument("--en-seco", action="store_true",
                     help="sube el siguiente pendiente y lo valida con dryRun (no publica)")
     ap.add_argument("--confirmar", action="store_true", help="sube y programa de verdad")
+    ap.add_argument("--esperar", action="store_true",
+                    help="si otra corrida está subiendo, espera su turno (la fábrica al terminar un video)")
     a = ap.parse_args()
     c = Canal(a.canal)
 
@@ -348,7 +373,7 @@ def main() -> None:
     if a.confirmar and not tomar_candado(c.candado):
         # Un calendario nuevo (lo manda el bot) espera a que el vigilante
         # termine de subir: si no, el vigilante guardaría encima el calendario viejo.
-        limite = time.time() + (1200 if a.videos else 0)
+        limite = time.time() + (1200 if a.videos or a.esperar else 0)
         tomado = False
         while not tomado and time.time() < limite:
             time.sleep(5)
@@ -386,12 +411,16 @@ def _programar(c: Canal, a: argparse.Namespace) -> None:
         if previos:
             print(f"(El calendario anterior tenía {len(previos)} ya programados en Zernio; esos siguen en pie.)")
         ahora_mx = datetime.now(TZ).replace(tzinfo=None)
-        desde = date.fromisoformat(a.desde) if a.desde else primer_dia_libre(cal, ahora_mx)
+        # El de un lote (bot) empieza HOY y sus primeros salen al terminar; uno
+        # a mano, mañana o tras lo ya programado.
+        desde = (date.fromisoformat(a.desde) if a.desde
+                 else ahora_mx.date() if a.lote else primer_dia_libre(cal, ahora_mx))
         ini, fin = (int(x) for x in a.ventana.split("-"))
         fijas = [h.strip() for h in a.horas.split(",")] if a.horas else None
         cal = {"creado": datetime.now(TZ).isoformat(timespec="seconds"), "videos": a.videos, "dias": a.dias,
                **({"lote": a.lote} if a.lote else {}),
-               "lugares": armar_calendario(a.videos, a.dias, desde, (ini, fin), fijas)}
+               "lugares": armar_calendario(a.videos, a.dias, desde, (ini, fin), fijas,
+                                           primer_dia_al_terminar=bool(a.lote) and desde == ahora_mx.date())}
     elif not cal:
         sys.exit(f"No hay calendario activo para {c.nombre}: usa --videos N --dias D")
 
@@ -400,7 +429,7 @@ def _programar(c: Canal, a: argparse.Namespace) -> None:
         # Solo se repone lo que todavía tiene un video del lote por llegar.
         llenos = sum(1 for l in cal["lugares"] if l["video"])
         vivos = sum(1 for l in cal["lugares"] if not l["video"] and not l.get("vencido")
-                    and datetime.fromisoformat(l["fecha"]) > ahora + timedelta(minutes=15))
+                    and not vencido(l, ahora))
         # Un lote terminado (o detenido) ya no manda más videos: no se repone.
         estado = leer_json(c.raiz / "fabrica" / cal["lote"] / "estado.json", {})
         sin_subir = len(pendientes(c, publicados, {l["video"] for l in cal["lugares"] if l["video"]}, cal["lote"]))
@@ -412,7 +441,7 @@ def _programar(c: Canal, a: argparse.Namespace) -> None:
 
     asignados = 0
     for lugar in cal["lugares"]:
-        if lugar["video"] or datetime.fromisoformat(lugar["fecha"]) <= ahora + timedelta(minutes=15):
+        if lugar["video"] or lugar.get("vencido") or vencido(lugar, ahora):
             continue
         if not cola:
             break
@@ -421,12 +450,15 @@ def _programar(c: Canal, a: argparse.Namespace) -> None:
         if a.confirmar:
             try:
                 print(f"  subiendo {mp4.name} ...", flush=True)
-                pid = zernio.programar(zernio.subir(mp4), texto_publicacion(guion), lugar["fecha"])
+                pid = zernio.programar(zernio.subir(mp4), texto_publicacion(guion),
+                                       None if lugar.get("al_terminar") else lugar["fecha"])
             except Exception as e:  # noqa: BLE001
                 print(f"  ✗ {mp4.name}: {e}")
                 break
             lugar.update(video=b, postId=pid)
-            publicados[b] = {"postId": pid, "programado": lugar["fecha"], "archivo": str(mp4)}
+            publicados[b] = {"postId": pid, "archivo": str(mp4),
+                             "programado": (datetime.now(TZ).isoformat(timespec="minutes") + " (al terminar)"
+                                            if lugar.get("al_terminar") else lugar["fecha"])}
             guardar_json(c.publicados, publicados)
             guardar_json(c.calendario, cal)
         else:
@@ -440,14 +472,16 @@ def _programar(c: Canal, a: argparse.Namespace) -> None:
     for dia, ls in por_dia.items():
         print(f"  {dia}")
         for l in ls:
-            hora = l["fecha"][11:16]
+            hora = "al terminar" if l.get("al_terminar") else l["fecha"][11:16]
             if l["video"]:
-                marca = "programado" if l.get("postId") else "← se programaría"
+                marca = ("publicado al terminar" if l.get("al_terminar") else "programado") \
+                    if l.get("postId") else "← se programaría"
                 print(f"    {hora}  {l['video']}  ({marca})")
             else:
-                vencido = datetime.fromisoformat(l["fecha"]) <= ahora
-                print(f"    {hora}  {'(ya pasó)' if vencido else '— libre: falta video'}")
-    libres = sum(1 for l in cal["lugares"] if not l["video"] and datetime.fromisoformat(l["fecha"]) > ahora)
+                paso = l.get("vencido") or datetime.fromisoformat(l["fecha"]) <= ahora
+                print(f"    {hora}  {'(ya pasó)' if paso else '— libre: falta video'}")
+    libres = sum(1 for l in cal["lugares"] if not l["video"] and not l.get("vencido")
+                 and datetime.fromisoformat(l["fecha"]) > ahora)
     print(f"\n{asignados} {'programados ahora' if a.confirmar else 'se programarían'}; "
           f"{libres} lugares libres esperando video; {len(cola)} videos sobrantes.")
     if a.confirmar:

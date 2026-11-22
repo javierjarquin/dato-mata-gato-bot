@@ -17,6 +17,8 @@ def _turno_de_maquina_aparte(monkeypatch, tmp_path):
     from dato_mata_gato_bot import fabrica
 
     monkeypatch.setattr(fabrica, "_dir_maquina", lambda: tmp_path / "_maquina")
+    # Ni subir a Zernio de verdad al terminar un video de prueba.
+    monkeypatch.setattr(fabrica, "subir_a_zernio", lambda: None)
 
 
 @pytest.fixture(autouse=True)

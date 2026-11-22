@@ -50,6 +50,33 @@ def test_lugar_vencido_se_repone_al_final_a_la_misma_hora():
     assert pz.reponer_vencidos(cal, ahora) == 0  # no lo repone dos veces
 
 
+def test_los_de_hoy_salen_al_terminar_y_el_resto_programado():
+    """Javier: "el horario tiene que ser apenas termine el video para los que se
+    generan hoy; el resto sí tienen que ir programados"."""
+    lugares = pz.armar_calendario(10, 3, date(2026, 11, 22), (10, 22), None, primer_dia_al_terminar=True)
+    hoy = [l for l in lugares if l["fecha"].startswith("2026-11-22")]
+    assert len(hoy) == 3 and all(l.get("al_terminar") for l in hoy)
+    assert not any(l.get("al_terminar") for l in lugares[3:])
+    assert _por_dia(lugares) == [3, 3, 4]
+    # Vale todo el día; uno con hora necesita 15 min de margen.
+    assert not pz.vencido(hoy[0], datetime(2026, 11, 22, 23, 50))
+    assert pz.vencido(hoy[0], datetime(2026, 11, 23, 0, 5))
+    assert pz.vencido(lugares[3], datetime(2026, 11, 23, 11, 50))  # el de las 12:00
+
+
+def test_uno_de_hoy_sin_video_se_repone_con_hora():
+    cal = {"lugares": pz.armar_calendario(3, 3, date(2026, 11, 22), (10, 22), None, primer_dia_al_terminar=True)}
+    assert pz.reponer_vencidos(cal, datetime(2026, 11, 23, 0, 5)) == 1
+    nuevo = cal["lugares"][-1]
+    assert nuevo["fecha"] == "2026-11-25T16:00:00" and not nuevo.get("al_terminar")
+
+
+def test_publicar_ya_no_lleva_fecha():
+    z = pz.Zernio("k", "cuenta", {})
+    assert z.cuerpo("u", "t", None)["publishNow"] is True and "scheduledFor" not in z.cuerpo("u", "t", None)
+    assert z.cuerpo("u", "t", "2026-11-23T16:00:00")["scheduledFor"] == "2026-11-23T16:00:00"
+
+
 def test_videos_de_un_lote_que_aun_no_existe(tmp_path, monkeypatch):
     monkeypatch.setattr(pz, "ENTRADA_BASE", tmp_path)
     c = pz.Canal("datomatagato")
