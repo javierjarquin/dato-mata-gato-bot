@@ -4,15 +4,23 @@
     python tools/programar_zernio.py --canal papasia --videos 20 --dias 10 --confirmar
     python tools/programar_zernio.py --canal datomatagato --confirmar                    # sigue su calendario
     python tools/programar_zernio.py --canal datomatagato --ya-publicado casomonstruodeatizapan
+    python tools/programar_zernio.py --canal datomatagato --videos 10 --dias 3 --lote todos-20261122-2100 --confirmar
 
 Canales: `papasia` (C:\\Android_in\\papasia) y `datomatagato` (C:\\Android_in).
 
 --videos N --dias D arma un calendario nuevo: N lugares repartidos en D días
-(N // D al día; si sobra, los primeros días llevan uno más), a horas parejas
-dentro de --ventana (default 10-22, hora de México) o en --horas. Cada lugar
-se llena con el siguiente video terminado y sin publicar de <canal>\\lotes (el
-más viejo primero). Si no alcanzan, los lugares quedan libres y se llenan al
-volver a correr; los que ya pasaron se saltan.
+(N // D al día; si sobra, los ÚLTIMOS días llevan uno más: 10 en 3 = 3, 3, 4),
+a horas parejas dentro de --ventana (default 10-22, hora de México) o en
+--horas. Empieza mañana, o el día después del último post del calendario
+anterior que todavía no sale. Cada lugar se llena con el siguiente video
+terminado y sin publicar de <canal>\\lotes (el más viejo primero). Si no
+alcanzan, los lugares quedan libres y se llenan al volver a correr; los que ya
+pasaron se saltan.
+
+--lote L (lo usan /lotegrande N D y /papasia N D desde Telegram): el calendario
+solo toma los videos de lotes\\L, cada uno en cuanto la fábrica lo genera. Si un
+lugar pasa sin video (todavía no se generaba), se repone al final a la misma
+hora, para que salgan los N.
 
 --ya-publicado <video> marca como publicado ese video y todos los anteriores
 (lo que se subió a mano antes de Zernio).
@@ -149,10 +157,12 @@ def horas_del_dia(cuantos: int, ventana: tuple[int, int], fijas: list[str] | Non
 
 
 def armar_calendario(videos: int, dias: int, desde: date, ventana, fijas) -> list[dict]:
+    """10 en 3 días = 3, 3 y 4: lo que sobra va en los ÚLTIMOS días (Javier,
+    22/11/2026), que es cuando ya hay más videos generados."""
     base, sobra = divmod(videos, dias)
     lugares = []
     for d in range(dias):
-        cuantos = base + (1 if d < sobra else 0)
+        cuantos = base + (1 if d >= dias - sobra else 0)
         if not cuantos:
             continue
         dia = desde + timedelta(days=d)
@@ -161,12 +171,41 @@ def armar_calendario(videos: int, dias: int, desde: date, ventana, fijas) -> lis
     return lugares
 
 
+def primer_dia_libre(cal: dict | None, ahora: datetime) -> date:
+    """Mañana, o el día siguiente al último post del calendario anterior que
+    todavía no sale: un calendario nuevo no se encima con lo ya programado."""
+    dia = ahora.date() + timedelta(days=1)
+    for l in (cal or {}).get("lugares", []):
+        f = datetime.fromisoformat(l["fecha"])
+        if l.get("postId") and f > ahora:
+            dia = max(dia, f.date() + timedelta(days=1))
+    return dia
+
+
+def reponer_vencidos(cal: dict, ahora: datetime) -> int:
+    """Calendario de un lote: si un lugar pasa sin video (la fábrica todavía no
+    lo generaba), se repone al final, a la misma hora del día siguiente al
+    último lugar. Así los N videos del lote salen todos; nunca se pierde uno."""
+    repuestos = 0
+    for l in cal["lugares"]:
+        if l["video"] or l.get("vencido") or datetime.fromisoformat(l["fecha"]) > ahora + timedelta(minutes=15):
+            continue
+        l["vencido"] = True
+        ultimo = max(datetime.fromisoformat(x["fecha"]) for x in cal["lugares"])
+        hora = datetime.fromisoformat(l["fecha"]).time()
+        nuevo = datetime.combine(ultimo.date() + (timedelta(days=1) if hora <= ultimo.time() else timedelta()), hora)
+        cal["lugares"].append({"fecha": nuevo.isoformat(timespec="seconds"), "video": None, "postId": None})
+        repuestos += 1
+    return repuestos
+
+
 # ---------- videos ----------
 
-def videos_archivados(c: Canal) -> list[Path]:
-    """Un mp4 por video (de 'x.mp4' y 'x_2.mp4', el último), del más viejo al más nuevo."""
+def videos_archivados(c: Canal, lote: str | None = None) -> list[Path]:
+    """Un mp4 por video (de 'x.mp4' y 'x_2.mp4', el último), del más viejo al
+    más nuevo. Con `lote`, solo los de lotes/<lote> (calendario de un comando)."""
     ultimo: dict[str, Path] = {}
-    for mp4 in c.lotes.rglob("*.mp4"):
+    for mp4 in (c.lotes / lote if lote else c.lotes).rglob("*.mp4"):
         if mp4.stem.endswith("_telegram"):
             continue
         b = base_video(mp4)
@@ -187,10 +226,11 @@ def indice_guiones(c: Canal) -> dict[str, Path]:
     return idx
 
 
-def pendientes(c: Canal, publicados: dict, ocupados: set[str]) -> list[tuple[Path, Path]]:
+def pendientes(c: Canal, publicados: dict, ocupados: set[str],
+               lote: str | None = None) -> list[tuple[Path, Path]]:
     guiones = indice_guiones(c)
     salida = []
-    for mp4 in videos_archivados(c):
+    for mp4 in videos_archivados(c, lote):
         b = base_video(mp4)
         if b in publicados or b in ocupados:
             continue
@@ -290,6 +330,8 @@ def main() -> None:
     ap.add_argument("--desde", help="primer día AAAA-MM-DD (default: mañana)")
     ap.add_argument("--ventana", default="10-22", help="horas parejas dentro de esta ventana (default 10-22)")
     ap.add_argument("--horas", help="horas fijas, p. ej. 13:00,19:00 (en lugar de la ventana)")
+    ap.add_argument("--lote", help="con --videos: el calendario solo toma los videos de lotes/<lote> "
+                                   "(lo que arma /lotegrande N D o /papasia N D)")
     ap.add_argument("--ya-publicado", metavar="VIDEO", help="marca ese video y los anteriores como publicados")
     ap.add_argument("--en-seco", action="store_true",
                     help="sube el siguiente pendiente y lo valida con dryRun (no publica)")
@@ -304,8 +346,16 @@ def main() -> None:
         _en_seco(c)
         return
     if a.confirmar and not tomar_candado(c.candado):
-        print("Ya hay otra corrida programando este canal; no hago nada.")
-        return
+        # Un calendario nuevo (lo manda el bot) espera a que el vigilante
+        # termine de subir: si no, el vigilante guardaría encima el calendario viejo.
+        limite = time.time() + (1200 if a.videos else 0)
+        tomado = False
+        while not tomado and time.time() < limite:
+            time.sleep(5)
+            tomado = tomar_candado(c.candado)
+        if not tomado:
+            print("Ya hay otra corrida programando este canal; no hago nada.")
+            sys.exit(2 if a.videos else 0)
     try:
         _programar(c, a)
     finally:
@@ -335,17 +385,29 @@ def _programar(c: Canal, a: argparse.Namespace) -> None:
         previos = [l for l in (cal or {}).get("lugares", []) if l.get("postId")]
         if previos:
             print(f"(El calendario anterior tenía {len(previos)} ya programados en Zernio; esos siguen en pie.)")
-        desde = date.fromisoformat(a.desde) if a.desde else datetime.now(TZ).date() + timedelta(days=1)
+        ahora_mx = datetime.now(TZ).replace(tzinfo=None)
+        desde = date.fromisoformat(a.desde) if a.desde else primer_dia_libre(cal, ahora_mx)
         ini, fin = (int(x) for x in a.ventana.split("-"))
         fijas = [h.strip() for h in a.horas.split(",")] if a.horas else None
         cal = {"creado": datetime.now(TZ).isoformat(timespec="seconds"), "videos": a.videos, "dias": a.dias,
+               **({"lote": a.lote} if a.lote else {}),
                "lugares": armar_calendario(a.videos, a.dias, desde, (ini, fin), fijas)}
     elif not cal:
         sys.exit(f"No hay calendario activo para {c.nombre}: usa --videos N --dias D")
 
     ahora = datetime.now(TZ).replace(tzinfo=None)
+    if cal.get("lote"):
+        # Solo se repone lo que todavía tiene un video del lote por llegar.
+        llenos = sum(1 for l in cal["lugares"] if l["video"])
+        vivos = sum(1 for l in cal["lugares"] if not l["video"] and not l.get("vencido")
+                    and datetime.fromisoformat(l["fecha"]) > ahora + timedelta(minutes=15))
+        # Un lote terminado (o detenido) ya no manda más videos: no se repone.
+        estado = leer_json(c.raiz / "fabrica" / cal["lote"] / "estado.json", {})
+        sin_subir = len(pendientes(c, publicados, {l["video"] for l in cal["lugares"] if l["video"]}, cal["lote"]))
+        if llenos + vivos < cal["videos"] and (not estado.get("terminado") or sin_subir > vivos):
+            reponer_vencidos(cal, ahora)
     ocupados = {l["video"] for l in cal["lugares"] if l["video"]}
-    cola = pendientes(c, publicados, ocupados)
+    cola = pendientes(c, publicados, ocupados, cal.get("lote"))
     zernio = Zernio(c.key(), c.cuenta(), c.ajustes) if a.confirmar else None
 
     asignados = 0
