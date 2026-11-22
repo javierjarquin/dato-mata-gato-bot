@@ -696,11 +696,36 @@ def problemas_tradiciones(slug: str) -> list[str]:
 async def _guiones_tradiciones(avisador, tema: str | None, cantidad: int,
                                ligera: bool | None = None) -> tuple[list[dict], list[str]]:
     """Un lote del nicho "el porqué de las tradiciones": las IA gratis escogen el
-    tema y leen las fuentes; Claude escribe el texto y las escenas 3D."""
-    from dato_mata_gato_bot import bot, expediente_tradiciones, instruccion_tradiciones
+    tema y leen las fuentes; Claude escribe el texto y las escenas 3D.
+
+    Desde el 22/11/2026 en un turno de Claude por guion (`tradiciones_guion`),
+    como papasia. TRADICIONES_UN_TURNO=0, o un expediente sin temas, lo regresan
+    a la sesión con herramientas de antes."""
+    import httpx
+
+    from dato_mata_gato_bot import (bot, expediente_tradiciones, ia_gratis, instruccion_tradiciones,
+                                    tradiciones_guion)
 
     ligera = sesion_ligera() if ligera is None else ligera
     ya = bot._ya_cubiertos("guion-tradicion-")
+    if tradiciones_guion.un_turno() and expediente.activo():
+        try:
+            hechos, limite = await asyncio.to_thread(
+                tradiciones_guion.lote, tema, cantidad, ya, tokens_de_sesiones, telegram)
+        except expediente.SinCuotaGratis:
+            raise  # la fábrica pregunta si sigue Claude o espera (27/10/2026)
+        except (ia_gratis.SinIA, httpx.HTTPError, ValueError, KeyError) as exc:
+            logger.warning("tradiciones: sin expediente de un turno (%s); escribe la sesión con herramientas", exc)
+        else:
+            await avisador.message.reply_text(
+                "🧾 Tradiciones, gasto de Claude por guion:\n"
+                + "\n".join(tradiciones_guion.renglon(g) for g in hechos))
+            buenos = [{"slug": g.slug, "vigencia": "perenne"} for g in hechos if g.paso]
+            if limite:
+                exc = bot.error_que_para(limite) or bot.LimiteDeClaude(limite)
+                exc.slugs = [g["slug"] for g in buenos]
+                raise exc
+            return buenos, [g.sesion for g in hechos]
     texto = instruccion_tradiciones.instruccion(cantidad, tema, ya, ligera=ligera)
     texto = await asyncio.to_thread(expediente_tradiciones.agregar, texto, tema, cantidad, ya, telegram)
     buenos, sesiones = await _escribir_y_rescatar(
