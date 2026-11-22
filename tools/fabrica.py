@@ -7,8 +7,10 @@
     python tools\\fabrica.py desinstalar
     python tools\\fabrica.py --perfil papasia ciclo <lote>   # un lote de otro canal
 
-Un solo vigilante para los dos canales (va una fábrica a la vez: comparten la
-voz). El lote de papasia lo corre un proceso hijo con `--perfil papasia`.
+Un solo vigilante para los dos canales. Desde el 22/11/2026 trabaja un lote de
+cada canal al mismo tiempo: los guiones en paralelo y la voz y el render
+turnándose video por video (fabrica.tomar_maquina). El lote de papasia lo
+corre un proceso hijo con `--perfil papasia`.
 
 El vigilante corre `ciclo` cada 15 minutos, oculto
 (pythonw). Si ya hay un ciclo vivo no hace nada (latido en disco), así que
@@ -19,6 +21,7 @@ import json
 import logging
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 RAIZ_BOT = Path(__file__).resolve().parents[1]
@@ -61,25 +64,47 @@ def _ciclo_de_otro_canal(lote: str, de_quien: str) -> str:
     return f"el ciclo del canal {de_quien} salió con código {r.returncode}: {(r.stderr or '')[-300:]}"
 
 
-def _programar_papasia() -> None:
-    """Si hay calendario de publicación (tools/programar_papasia.py), los videos
-    nuevos de papasia toman el siguiente lugar libre en Zernio. Lo corre el
+def _ciclo_de_canal(de_quien: str, lotes: list[str]) -> None:
+    """Los lotes de UN canal, uno tras otro (como siempre)."""
+    for lote in lotes:
+        try:
+            if de_quien == canal.actual():
+                motivo = fabrica.ciclo(lote)
+            else:
+                motivo = _ciclo_de_otro_canal(lote, de_quien)
+        except Exception:  # noqa: BLE001
+            logging.exception("ciclo %s", lote)
+            break
+        logging.info("ciclo %s: %s", lote, motivo)
+        print(f"{lote}: {motivo}", flush=True)
+        if motivo == "ya hay un ciclo corriendo":
+            continue
+        if motivo != "terminado":
+            break
+
+
+def _programar_en_zernio() -> None:
+    """Para cada canal con calendario de publicación (tools/programar_zernio.py),
+    los videos nuevos toman el siguiente lugar libre en Zernio. Lo corre el
     vigilante en cada vuelta (cada 15 min); sin videos nuevos no llama a Zernio.
     Un fallo aquí no detiene la fábrica."""
-    if not (canal.raiz_fabrica("papasia").parent / "zernio_calendario.json").exists():
-        return
     py = Path(sys.executable).with_name("python.exe")
-    try:
-        r = subprocess.run([str(py), str(Path(__file__).with_name("programar_papasia.py")), "--confirmar"],
-                           cwd=str(RAIZ_BOT), capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", timeout=3600,
-                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        resumen = [l for l in (r.stdout or "").splitlines() if l.startswith(("  subiendo", "  ✗", "  !"))]
-        if resumen or r.returncode:
-            logging.info("programar papasia (código %s): %s %s", r.returncode, " | ".join(resumen),
-                         (r.stderr or "")[-300:])
-    except Exception:  # noqa: BLE001
-        logging.exception("programar papasia falló")
+    for c in canal.canales():
+        if not (canal.entrada(c) / "zernio_calendario.json").exists():
+            continue
+        nombre = c or "datomatagato"
+        try:
+            r = subprocess.run([str(py), str(Path(__file__).with_name("programar_zernio.py")),
+                                "--canal", nombre, "--confirmar"],
+                               cwd=str(RAIZ_BOT), capture_output=True, text=True, encoding="utf-8",
+                               errors="replace", timeout=3600,
+                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            resumen = [l for l in (r.stdout or "").splitlines() if l.startswith(("  subiendo", "  ✗", "  !"))]
+            if resumen or r.returncode:
+                logging.info("zernio %s (código %s): %s %s", nombre, r.returncode, " | ".join(resumen),
+                             (r.stderr or "")[-300:])
+        except Exception:  # noqa: BLE001
+            logging.exception("zernio %s falló", nombre)
 
 
 def _leer(lote: str, de_quien: str) -> dict:
@@ -145,25 +170,24 @@ def main() -> int:
     if cmd == "ciclo":
         lotes = args[1:] or _lotes_activos()
         _log(lotes[0] if len(lotes) == 1 else None)
+        por_canal: dict[str, list[str]] = {}
         for lote in lotes:
             de_quien = _canal_de(lote)
             if de_quien is None:
                 print(f"{lote}: no existe")
-                continue
-            if de_quien == canal.actual():
-                motivo = fabrica.ciclo(lote)
-            elif not canal.actual():
-                motivo = _ciclo_de_otro_canal(lote, de_quien)
-            else:
-                continue  # un proceso de papasia no toca los lotes de Dato Mata Gato
-            logging.info("ciclo %s: %s", lote, motivo)
-            print(f"{lote}: {motivo}")
-            if motivo == "ya hay un ciclo corriendo":
-                continue
-            if motivo != "terminado":
-                break  # una fábrica a la vez: comparten VoiceStudio
+            elif de_quien == canal.actual() or not canal.actual():
+                # un proceso de papasia no toca los lotes de Dato Mata Gato
+                por_canal.setdefault(de_quien, []).append(lote)
+        # Un lote por canal a la vez, y los dos canales al mismo tiempo
+        # (22/11/2026): los guiones se escriben en paralelo y la máquina (voz y
+        # render) se turna video por video (fabrica.tomar_maquina).
+        hilos = [threading.Thread(target=_ciclo_de_canal, args=(c, ls)) for c, ls in por_canal.items()]
+        for h in hilos:
+            h.start()
+        for h in hilos:
+            h.join()
         if not canal.actual():
-            _programar_papasia()
+            _programar_en_zernio()
         return 0
     if cmd == "instalar":
         pyw = Path(sys.executable).with_name("pythonw.exe")

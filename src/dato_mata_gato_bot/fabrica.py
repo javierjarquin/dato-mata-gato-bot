@@ -343,6 +343,83 @@ def _latir(lote: str, parar: threading.Event) -> None:
                                       encoding="utf-8")
 
 
+# ------------------------------------------------------------ turno de la máquina
+# Dos lotes a la vez, uno por canal (22/11/2026, Javier: "/lotegrande 10 3 y
+# /papasia 10 3 juntos, 3 de cada uno cada día, no encolado"). La voz
+# (VoiceStudio) y el render son uno solo, así que cada video toma la máquina
+# entera; los guiones sí se escriben en paralelo. Se turnan: quien acaba de
+# usarla la cede si el otro lote está esperando. Archivos en la fábrica del
+# canal base, que ven los dos.
+
+ESPERA_MAQUINA = 10      # cada cuánto pregunta quien espera turno
+ESPERA_FRESCA = 90       # una espera más vieja que esto es de un ciclo que ya no está
+
+
+def _dir_maquina() -> Path:
+    return canal.raiz_fabrica("")
+
+
+def _leer_json(ruta: Path) -> dict:
+    try:
+        return json.loads(ruta.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _otro_esperando(lote: str) -> bool:
+    for ruta in _dir_maquina().glob("espera-*.json"):
+        d = _leer_json(ruta)
+        if (d.get("lote") and d["lote"] != lote and time.time() - d.get("t", 0) < ESPERA_FRESCA
+                and _proceso_vivo(int(d.get("pid", 0)))):
+            return True
+    return False
+
+
+def _maquina_ocupada() -> bool:
+    ruta = _dir_maquina() / "maquina.json"
+    d = _leer_json(ruta)
+    if not ruta.exists():
+        return False
+    if d.get("pid") and _proceso_vivo(int(d["pid"])) and time.time() - d.get("t", 0) < TIMEOUT_VIDEO + 600:
+        return True
+    ruta.unlink(missing_ok=True)  # quien la tenía ya murió
+    return False
+
+
+def tomar_maquina(lote: str, rendirse=lambda: False) -> bool:
+    """Espera el turno de la máquina para hacer UN video. False si `rendirse()`
+    (p. ej. entró un /pararfabrica mientras esperaba)."""
+    _dir_maquina().mkdir(parents=True, exist_ok=True)
+    espera = _dir_maquina() / f"espera-{lote}.json"
+    try:
+        while True:
+            if rendirse():
+                return False
+            espera.write_text(json.dumps({"lote": lote, "pid": os.getpid(), "t": time.time()}),
+                              encoding="utf-8")
+            ultimo = _leer_json(_dir_maquina() / "maquina_ultimo.json").get("lote")
+            if not _maquina_ocupada() and not (ultimo == lote and _otro_esperando(lote)):
+                try:
+                    fd = os.open(_dir_maquina() / "maquina.json", os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                except FileExistsError:
+                    pass
+                else:
+                    os.write(fd, json.dumps({"lote": lote, "pid": os.getpid(), "t": time.time()}).encode())
+                    os.close(fd)
+                    return True
+            time.sleep(ESPERA_MAQUINA)
+    finally:
+        espera.unlink(missing_ok=True)
+
+
+def soltar_maquina(lote: str) -> None:
+    (_dir_maquina() / "maquina_ultimo.json").write_text(json.dumps({"lote": lote, "t": time.time()}),
+                                                         encoding="utf-8")
+    ruta = _dir_maquina() / "maquina.json"
+    if _leer_json(ruta).get("pid") == os.getpid():
+        ruta.unlink(missing_ok=True)
+
+
 # ---------------------------------------------------------------------- trabajo
 
 # La fórmula de Javier (12/10/2026), "la contradicción local": te afecta (autorreferencia)
@@ -1384,21 +1461,42 @@ def ciclo(lote: str) -> str:
         _ruta_latido(lote).unlink(missing_ok=True)
 
 
+_PROGRAMAR_ZERNIO = Path(__file__).resolve().parents[2] / "tools" / "programar_zernio.py"
+
+
+def subir_a_zernio() -> None:
+    """Si el canal tiene calendario de Zernio, el video recién hecho se sube YA
+    (22/11/2026, Javier: los del día del comando salen "apenas termine el
+    video"), sin esperar la vuelta de 15 min del vigilante. Corre aparte, para
+    no frenar el siguiente video; si alguien más está subiendo, espera turno."""
+    if not (canal.entrada() / "zernio_calendario.json").exists():
+        return
+    py = Path(sys.executable).with_name("python.exe")
+    try:
+        subprocess.Popen([str(py if py.exists() else sys.executable), str(_PROGRAMAR_ZERNIO),
+                          "--canal", canal.actual() or "datomatagato", "--confirmar", "--esperar"],
+                         cwd=str(_PROGRAMAR_ZERNIO.parents[1]), stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, creationflags=_SIN_VENTANA)
+    except OSError:
+        logger.exception("no pude lanzar programar_zernio")
+
+
+def _avisar_pausa(lote: str, estado: dict, problema: str) -> str:
+    if time.time() - estado["ultimo_aviso_infra"] > AVISO_INFRA_CADA:
+        telegram(f"⚠️ Fábrica {lote} en pausa: {problema}\nLo reintento cada 15 minutos.")
+        estado["ultimo_aviso_infra"] = time.time()
+        guardar(lote, estado)
+    return problema
+
+
 def _ciclo(lote: str) -> str:
     while True:
         estado = leer(lote)
         if estado["terminado"]:
             return "terminado"
-        problema = asegurar_infra()
-        if not problema and disco_libre_gb() < DISCO_MINIMO_GB:
-            problema = (f"quedan {disco_libre_gb():.0f} GB libres en el disco (mínimo "
-                        f"{DISCO_MINIMO_GB}). Libera espacio o mueve videos ya publicados.")
-        if problema:
-            if time.time() - estado["ultimo_aviso_infra"] > AVISO_INFRA_CADA:
-                telegram(f"⚠️ Fábrica {lote} en pausa: {problema}\nLo reintento cada 15 minutos.")
-                estado["ultimo_aviso_infra"] = time.time()
-                guardar(lote, estado)
-            return problema
+        if disco_libre_gb() < DISCO_MINIMO_GB:
+            return _avisar_pausa(lote, estado, f"quedan {disco_libre_gb():.0f} GB libres en el disco "
+                                 f"(mínimo {DISCO_MINIMO_GB}). Libera espacio o mueve videos ya publicados.")
 
         fila = pendientes(estado)
         cuota_libre = (estado["cuota_libre_desde"] is None
@@ -1464,13 +1562,25 @@ def _ciclo(lote: str) -> str:
         slug = fila[0]
         if detenida(lote):  # pudo entrar el /pararfabrica mientras se escribía
             return "detenida"
-        ok, mensaje = _correr_video(lote, slug)
+        # Un video a la vez en la máquina, turnándose con el lote del otro canal.
+        # Docker y VoiceStudio se revisan ya con el turno: antes de tenerlo, el
+        # otro lote puede estar usando la voz y tardar en contestar.
+        if not tomar_maquina(lote, lambda: detenida(lote)):
+            return "detenida"
+        try:
+            if problema := asegurar_infra():
+                return _avisar_pausa(lote, leer(lote), problema)
+            ok, mensaje = _correr_video(lote, slug)
+        finally:
+            soltar_maquina(lote)
         estado = leer(lote)
         v = estado["videos"][slug]
         v["intentos"] += 1
         v["estado"] = "listo" if ok else "fallido"
         v["error"] = "" if ok else mensaje[-500:]
         guardar(lote, estado)
+        if ok:
+            subir_a_zernio()
         if not ok:
             otra = "lo reintento al final de la fila" if v["intentos"] < MAX_INTENTOS else "queda fuera"
             telegram(f"⚠️ {slug} falló ({otra}):\n{mensaje[-500:]}")
