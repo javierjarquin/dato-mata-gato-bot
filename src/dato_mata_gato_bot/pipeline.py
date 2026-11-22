@@ -1170,8 +1170,13 @@ def variante_portada(slug: str) -> str:
     portada: portada.py revienta con KeyError 'planos' (un guion 3D trae
     "escenas", no "planos") y _portadas se traga el error. Lo destapó el primer
     video de papasia el 12/11/2026; los de tradiciones del 08 y 10/11 tampoco
-    tienen portada, y nadie lo había visto."""
-    if formato_3d(slug):
+    tienen portada, y nadie lo había visto.
+
+    Papasia lleva la suya desde el 22/11/2026 (portada_papasia.py, estilo del
+    banner de Papás con IA): con la gancho salía con el logo de Dato Mata Gato."""
+    if (f := formato_3d(slug)) == "papasia":
+        return "papasia"
+    if f:
         return "gancho"
     return (os.getenv("PORTADA_VARIANTE") or "nota").strip().lower()
 
@@ -1206,6 +1211,8 @@ def _portadas(slug: str, final: Path) -> str:
     (portada_<estilo>.jpg) y se pega como primer cuadro. Si algo falla, el
     video sigue sin portada."""
     proyecto = final.parent
+    if variante_portada(slug) == "papasia":
+        return _portada_papasia(slug, final)
     hechas = []
     try:
         for v in (variante_portada(slug),):
@@ -1228,6 +1235,23 @@ def _portadas(slug: str, final: Path) -> str:
     pegada = _pegar_portada(final, proyecto / f"portada_{elegida}.jpg")
     etiqueta = {"nota": "A (la nota)", "dato": "B (el dato)", "gancho": "C (el gancho)"}[elegida]
     return f"portada {etiqueta}" + (" en el primer cuadro" if pegada else " (no se pudo pegar)")
+
+
+def _portada_papasia(slug: str, final: Path) -> str:
+    """La portada de Papás con IA (logo, plus.portada y un cuadro del video),
+    pegada como primer cuadro. Se arma con un cuadro del segundo 1 ANTES de
+    pegarla, así que no se ve a sí misma."""
+    from dato_mata_gato_bot import portada_papasia
+
+    destino = final.parent / "portada_papasia.jpg"
+    try:
+        guion = json.loads((ANDROID_IN / slug / "guion.json").read_text(encoding="utf-8"))
+        portada_papasia.armar(guion, final, destino)
+    except Exception:  # noqa: BLE001 — sin portada el video sigue
+        logger.exception("portada papasia de %s", slug)
+        return "portada: no salió"
+    pegada = _pegar_portada(final, destino)
+    return "portada Papás con IA" + (" en el primer cuadro" if pegada else " (no se pudo pegar)")
 
 
 def velocidad_de_la_voz(slug: str, avatar: bool = False) -> float | None:
@@ -1284,7 +1308,7 @@ def _archivar_local(slug: str, final_mp4: Path, carpeta: Path) -> Path:
         n += 1
     shutil.copy2(final_mp4, destino)
     # Las portadas viajan con el video (14/10/2026): <nombre>_portada_<estilo>.jpg.
-    for v in ("nota", "dato", "gancho"):
+    for v in ("nota", "dato", "gancho", "papasia"):
         portada = final_mp4.parent / f"portada_{v}.jpg"
         if portada.exists():
             shutil.copy2(portada, destino.with_name(f"{destino.stem}_portada_{v}.jpg"))

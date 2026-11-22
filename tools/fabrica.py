@@ -61,6 +61,27 @@ def _ciclo_de_otro_canal(lote: str, de_quien: str) -> str:
     return f"el ciclo del canal {de_quien} salió con código {r.returncode}: {(r.stderr or '')[-300:]}"
 
 
+def _programar_papasia() -> None:
+    """Si hay calendario de publicación (tools/programar_papasia.py), los videos
+    nuevos de papasia toman el siguiente lugar libre en Zernio. Lo corre el
+    vigilante en cada vuelta (cada 15 min); sin videos nuevos no llama a Zernio.
+    Un fallo aquí no detiene la fábrica."""
+    if not (canal.raiz_fabrica("papasia").parent / "zernio_calendario.json").exists():
+        return
+    py = Path(sys.executable).with_name("python.exe")
+    try:
+        r = subprocess.run([str(py), str(Path(__file__).with_name("programar_papasia.py")), "--confirmar"],
+                           cwd=str(RAIZ_BOT), capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=3600,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        resumen = [l for l in (r.stdout or "").splitlines() if l.startswith(("  subiendo", "  ✗", "  !"))]
+        if resumen or r.returncode:
+            logging.info("programar papasia (código %s): %s %s", r.returncode, " | ".join(resumen),
+                         (r.stderr or "")[-300:])
+    except Exception:  # noqa: BLE001
+        logging.exception("programar papasia falló")
+
+
 def _leer(lote: str, de_quien: str) -> dict:
     """El estado de un lote de cualquier canal (`fabrica.leer` solo ve los de este)."""
     ruta = canal.raiz_fabrica(de_quien) / lote / "estado.json"
@@ -141,6 +162,8 @@ def main() -> int:
                 continue
             if motivo != "terminado":
                 break  # una fábrica a la vez: comparten VoiceStudio
+        if not canal.actual():
+            _programar_papasia()
         return 0
     if cmd == "instalar":
         pyw = Path(sys.executable).with_name("pythonw.exe")
