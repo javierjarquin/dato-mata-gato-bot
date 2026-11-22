@@ -1320,7 +1320,8 @@ async def _arrancar_viral(update: Update, context: ContextTypes.DEFAULT_TYPE,
             f"Sin tema, Claude busca: /{f['comando']} 5\n"
             f"Generar y publicar en TikTok: /{f['comando']} 10 3 → 10 videos en 3 días (3, 3 y 4)")
         return
-    if activas := _fabricas_activas():
+    # Un lote por canal (22/11/2026): el del otro canal ya no estorba, se turnan la máquina.
+    if activas := _fabricas_mias():
         await update.message.reply_text(_aviso_ocupada(activas))
         return
     lote = f"{formato}-{datetime.now():%Y%m%d-%H%M}"
@@ -1441,7 +1442,8 @@ def _aviso_ocupada(activas: list[dict]) -> str:
                 "comparten la voz y el render, va un lote a la vez):\n"
                 + "\n".join(fabrica.resumen(e) for e in ajenas)
                 + f"\n\nEspera a que termine, o detenlo desde el bot de {de_quien}.")
-    return ("Ya hay una fábrica trabajando (comparten la voz, va una a la vez):\n"
+    return ("Ya hay una fábrica de este canal trabajando (va un lote por canal; el del otro "
+            "canal sí puede correr al mismo tiempo):\n"
             + "\n".join(fabrica.resumen(e) for e in activas)
             + "\n\nEspera a que termine o detenla con /pararfabrica.")
 
@@ -1507,7 +1509,7 @@ async def _lotegrande_automatico(update: Update, n: int, horario: str, tema: str
     if not _authorized(update.effective_chat.id):
         await _reject_unauthorized(update)
         return
-    activas = _fabricas_activas()
+    activas = _fabricas_mias()
     if activas:
         await update.message.reply_text(_aviso_ocupada(activas))
         return

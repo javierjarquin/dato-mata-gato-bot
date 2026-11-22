@@ -11,6 +11,15 @@ def _sin_docker_real(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _turno_de_maquina_aparte(monkeypatch, tmp_path):
+    """El turno de la máquina (22/11/2026) vive en C:\\Android_in\\fabrica, que ven
+    los dos canales: los tests no pueden tocar el de la fábrica de verdad."""
+    from dato_mata_gato_bot import fabrica
+
+    monkeypatch.setattr(fabrica, "_dir_maquina", lambda: tmp_path / "_maquina")
+
+
+@pytest.fixture(autouse=True)
 def _sin_expediente(monkeypatch):
     """El expediente (27/10/2026) sale a Google News, Bing y Gemini. Los tests de
     la fábrica no pueden depender de la red: va apagado salvo en sus tests."""
