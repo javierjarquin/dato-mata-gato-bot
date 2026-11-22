@@ -177,6 +177,33 @@ def test_lotegrande_con_redes_es_redes(tmp_path, monkeypatch):
     assert "5 polémica + 3 tema viral + 2 comparativa" in respuestas[0]
 
 
+def test_lotegrande_con_dias_programa_la_publicacion(tmp_path, monkeypatch):
+    """22/11/2026, Javier: "/lotegrande 10 3 significa 10 videos entre 3 días"."""
+    monkeypatch.setattr(fabrica, "RAIZ", tmp_path)
+    monkeypatch.setattr(bot, "_authorized", lambda chat: True)
+    import subprocess
+    monkeypatch.setattr(subprocess, "Popen", lambda args, **k: None)
+    publicaciones = []
+    monkeypatch.setattr(bot, "_lanzar_publicacion", lambda u, lote, n, dias: publicaciones.append((lote, n, dias)))
+    respuestas = []
+
+    async def responder(texto, **_):
+        respuestas.append(texto)
+
+    update = SimpleNamespace(effective_chat=SimpleNamespace(id=1),
+                             message=SimpleNamespace(reply_text=responder))
+    asyncio.run(bot.cmd_lotegrande(update, SimpleNamespace(args=["10", "3"])))
+    e = json.loads(next(tmp_path.glob("todos-*/estado.json")).read_text(encoding="utf-8"))
+    assert e["objetivo"] == 10  # antes el 3 pisaba al 10
+    assert publicaciones == [(e["lote"], 10, 3)]
+    assert "se sube a TikTok" in respuestas[0]
+
+    # Sin días, como siempre: no se toca Zernio. Más días que videos, no.
+    asyncio.run(bot.cmd_pararfabrica(update, SimpleNamespace(args=[])))
+    asyncio.run(bot.cmd_lotegrande(update, SimpleNamespace(args=["3", "5"])))
+    assert respuestas[-1].startswith("Uso:") and len(publicaciones) == 1
+
+
 def test_lotegrande_solo_con_cantidad_es_todos(tmp_path, monkeypatch):
     """06/11/2026, Javier: "el lote grande tiene que generar cualquiera de los
     formatos que tenemos, no solo de noticias... si te pido 5 es uno de cada formato"."""

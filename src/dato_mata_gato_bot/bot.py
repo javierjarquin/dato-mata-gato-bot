@@ -601,6 +601,9 @@ HELP_TEXT = """Comandos disponibles — flujo típico: /nuevovideo → mandar gu
   Claude busca de qué se está hablando; la fábrica escribe Y genera sola, sigue
   sola si se acaba la cuota, y cada video te llega aquí (se archiva sin
   publicar). Ejemplos: /lotegrande 10 · /lotegrande 20 0-9 (Claude de 0 a 9 h)
+  Con un segundo número, los días para publicar en TikTok (Zernio):
+  /lotegrande 10 3 = 10 videos en 3 días (3, 3 y 4); cada uno se sube en
+  cuanto se genera. Igual en /temaviral 10 3, /tradicion 10 3 y los demás.
   Con tema (cancun, cdmx, terror, historia, marfil) o "cercania": la fórmula de
   la contradicción local, 3 de conversación por cada 2 perennes. Con "dia" o un
   horario es automática; con tema y sin horario solo escribe.
@@ -818,7 +821,7 @@ BOT_COMMANDS = [
     ("mitos", "Lote de mitos y leyendas [cantidad]"),
     ("completarlote", "Escribir lo que faltó del último lote (si se acabó la cuota)"),
     ("generarlote", "Generar los videos del último lote"),
-    ("lotegrande", "Lote grande: todos los formatos [cantidad] [0-9] · redes · cercania · variado"),
+    ("lotegrande", "Lote grande: todos los formatos [cantidad] [días TikTok] [0-9] · redes · cercania · variado"),
     ("temaviral", "Tema viral [cantidad] [tema] (sin tema, busca tendencias)"),
     ("polemica", "Polémica [cantidad] [tema] (cuando lo viral lo detonó una opinión)"),
     ("comparativa", "Comparativa [cantidad] [tema]: ahora vs antes, ¿quién lo hace mejor?"),
@@ -872,7 +875,7 @@ vez entre los dos canales: si el otro está trabajando, este espera.
 /ayuda o /help — vuelve a mostrar este mensaje."""
 
 BOT_COMMANDS_PAPASIA = [
-    ("papasia", "Papás primerizos [cantidad] [tema] (video 3D)"),
+    ("papasia", "Papás primerizos [cantidad] [días TikTok] [tema] (video 3D)"),
     ("fabrica", "Cómo va el lote de este canal"),
     ("pararfabrica", "Detener el lote de este canal"),
     ("estatus", "Ver si hay algo corriendo"),
@@ -1174,9 +1177,21 @@ async def cmd_lotegrande(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     temas = {clave: nombre for clave, nombre, _ in instruccion_cercania.TEMAS}
     n, tema, horario, modo = _LOTE_GRANDE_DEFAULT, None, None, "todos"
+    uso = ("Uso: /lotegrande [cantidad] [0-9]       → todos los formatos, uno de cada uno, automático\n"
+           "     /lotegrande 10 3                   → 10 videos y se publican en TikTok en 3 días (3, 3 y 4)\n"
+           "     /lotegrande 10 dia redes           → polémica + tema viral (3:2), automático\n"
+           "     /lotegrande 10 dia notedicen       → lo que no te dicen, automático\n"
+           "     /lotegrande 20 dia cercania [tema] → contradicción local, automático\n"
+           "     /lotegrande 15 0-9 cancun          → contradicción local, Claude de 0 a 9 h\n"
+           "     /lotegrande 15 variado             → el lote viejo de crimen + trivia (solo escribe)\n"
+           "     /lotegrande 10 dia tradiciones     → el porqué de las tradiciones (3D), automático\n"
+           f"Temas con la fórmula de cercanía: {', '.join(temas)}")
+    # /lotegrande 10 3 (22/11/2026): el primer número es la cantidad y el
+    # segundo, los días para publicarlos en TikTok con Zernio.
+    numeros: list[int] = []
     for arg in context.args or []:
         if arg.isdigit():
-            n = int(arg)
+            numeros.append(int(arg))
         elif arg.lower() in ("todos", "redes", "cercania", "variado", "tradiciones", "notedicen"):
             modo = arg.lower()
         elif arg.lower() in temas:
@@ -1187,24 +1202,22 @@ async def cmd_lotegrande(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         elif re.fullmatch(r"\d{1,2}-\d{1,2}", arg) and all(0 <= int(x) <= 24 for x in arg.split("-")):
             horario = arg
         else:
-            await update.message.reply_text(
-                "Uso: /lotegrande [cantidad] [0-9]       → todos los formatos, uno de cada uno, automático\n"
-                "     /lotegrande 10 dia redes           → polémica + tema viral (3:2), automático\n"
-                "     /lotegrande 10 dia notedicen       → lo que no te dicen, automático\n"
-                "     /lotegrande 20 dia cercania [tema] → contradicción local, automático\n"
-                "     /lotegrande 15 0-9 cancun          → contradicción local, Claude de 0 a 9 h\n"
-                "     /lotegrande 15 variado             → el lote viejo de crimen + trivia (solo escribe)\n"
-                "     /lotegrande 10 dia tradiciones     → el porqué de las tradiciones (3D), automático\n"
-                f"Temas con la fórmula de cercanía: {', '.join(temas)}")
+            await update.message.reply_text(uso)
             return
+    if numeros:
+        n = numeros[0]
+    dias = numeros[1] if len(numeros) == 2 else None
+    if len(numeros) > 2 or (dias is not None and (not 1 <= dias <= n or modo == "variado")):
+        await update.message.reply_text(uso)
+        return
     if modo in ("todos", "redes", "tradiciones", "notedicen"):
-        await _lotegrande_automatico(update, n, horario or "", None, formato=modo)
+        await _lotegrande_automatico(update, n, horario or "", None, formato=modo, dias=dias)
         return
     if modo == "variado":
         await _pedir_lote(update, context, formatos.repartir, cantidad=n)
         return
-    if horario is not None or not tema:
-        await _lotegrande_automatico(update, n, horario or "", tema)
+    if horario is not None or not tema or dias:
+        await _lotegrande_automatico(update, n, horario or "", tema, dias=dias)
         return
     # Con tema y sin horario (13/10/2026): la fórmula de la contradicción local,
     # la misma de la fábrica, escrita en la sesión ligera. Sin presentador.
@@ -1291,17 +1304,24 @@ async def _arrancar_viral(update: Update, context: ContextTypes.DEFAULT_TYPE,
     f = _FORMULAS_VIRALES[formato]
     args = list(context.args or [])
     n = _TEMAVIRAL_DEFAULT
+    dias = None
     if args and args[0].isdigit():
         n = int(args.pop(0))
+        # Segundo número = días para publicarlos en TikTok (22/11/2026): /papasia 10 3.
+        # "/tradicion 5 2 de noviembre" sigue siendo un tema.
+        if args and args[0].isdigit() and (len(args) == 1 or args[1].lower() != "de"):
+            dias = int(args.pop(0))
     # El resto es el tema, tal cual lo escribió Javier ("israel y yucatan").
     tema = " ".join(args).strip() or None
-    if not 1 <= n <= 50:
+    if not 1 <= n <= 50 or (dias is not None and not 1 <= dias <= n):
         await update.message.reply_text(
-            f"Uso: /{f['comando']} [cantidad 1-50] [tema]\n"
+            f"Uso: /{f['comando']} [cantidad 1-50] [días para publicar] [tema]\n"
             f"Ejemplo: /{f['comando']} 5 {f['ejemplo']}\n"
-            f"Sin tema, Claude busca: /{f['comando']} 5")
+            f"Sin tema, Claude busca: /{f['comando']} 5\n"
+            f"Generar y publicar en TikTok: /{f['comando']} 10 3 → 10 videos en 3 días (3, 3 y 4)")
         return
-    if activas := _fabricas_activas():
+    # Un lote por canal (22/11/2026): el del otro canal ya no estorba, se turnan la máquina.
+    if activas := _fabricas_mias():
         await update.message.reply_text(_aviso_ocupada(activas))
         return
     lote = f"{formato}-{datetime.now():%Y%m%d-%H%M}"
@@ -1311,14 +1331,17 @@ async def _arrancar_viral(update: Update, context: ContextTypes.DEFAULT_TYPE,
                       *(["--perfil", PERFIL] if PERFIL else []), "ciclo", lote],
                      cwd=str(_FABRICA_CLI.parents[1]),
                      creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "DETACHED_PROCESS", 0))
+    if dias:
+        _lanzar_publicacion(update, lote, n, dias)
     de_donde = tema if tema else "lo busca Claude (" + f["busca"] + ")"
     await update.message.reply_text(
         f"{f['titulo']} {lote}: {n} videos.\n"
         f"• Tema: {de_donde}\n"
         + "\n".join(f["lineas"]) + "\n"
         f"• Generar todo toma ~{n * 45 / 60:.0f} h. Cada video te llega aquí y se archiva en "
-        f"{estado['carpeta_videos']} sin publicar.\n"
-        "Estado: /fabrica · Detener: /pararfabrica")
+        f"{estado['carpeta_videos']} "
+        + (f"y se sube a TikTok (Zernio) en {dias} días.\n" if dias else "sin publicar.\n")
+        + "Estado: /fabrica · Detener: /pararfabrica")
 
 
 async def cmd_temaviral(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1419,13 +1442,68 @@ def _aviso_ocupada(activas: list[dict]) -> str:
                 "comparten la voz y el render, va un lote a la vez):\n"
                 + "\n".join(fabrica.resumen(e) for e in ajenas)
                 + f"\n\nEspera a que termine, o detenlo desde el bot de {de_quien}.")
-    return ("Ya hay una fábrica trabajando (comparten la voz, va una a la vez):\n"
+    return ("Ya hay una fábrica de este canal trabajando (va un lote por canal; el del otro "
+            "canal sí puede correr al mismo tiempo):\n"
             + "\n".join(fabrica.resumen(e) for e in activas)
             + "\n\nEspera a que termine o detenla con /pararfabrica.")
 
 
+_PROGRAMAR_ZERNIO = Path(__file__).resolve().parents[2] / "tools" / "programar_zernio.py"
+_DIAS_SEMANA = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"]
+
+
+def _lanzar_publicacion(update: Update, lote: str, n: int, dias: int) -> None:
+    """/lotegrande N D, /papasia N D (22/11/2026, Javier): además de generar, arma
+    el calendario de Zernio del canal con N lugares en D días, amarrado a este
+    lote. Cada video se sube en cuanto la fábrica lo genera (el vigilante corre
+    programar_zernio cada 15 min). Corre aparte: si el vigilante está subiendo,
+    programar_zernio espera su turno, y el bot no se queda esperando."""
+
+    async def tarea() -> None:
+        import subprocess
+
+        py = Path(sys.executable).with_name("python.exe")
+        cmd = [str(py if py.exists() else sys.executable), str(_PROGRAMAR_ZERNIO),
+               "--canal", PERFIL or "datomatagato", "--videos", str(n), "--dias", str(dias),
+               "--lote", lote, "--confirmar"]
+        try:
+            r = await asyncio.to_thread(
+                subprocess.run, cmd, cwd=str(_PROGRAMAR_ZERNIO.parents[1]), capture_output=True,
+                text=True, encoding="utf-8", errors="replace", timeout=1800,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            if r.returncode:
+                raise RuntimeError(((r.stdout or "") + (r.stderr or ""))[-600:])
+            cal = json.loads((canal.entrada(PERFIL) / "zernio_calendario.json").read_text(encoding="utf-8"))
+            por_dia: dict[str, list[str]] = {}
+            for l in cal["lugares"]:
+                por_dia.setdefault(l["fecha"][:10], []).append(
+                    "al terminar" if l.get("al_terminar") else l["fecha"][11:16])
+            lineas = []
+            hoy = datetime.now().date()
+            for dia, horas in por_dia.items():
+                d = datetime.fromisoformat(dia)
+                nombre = "hoy" if d.date() == hoy else f"{_DIAS_SEMANA[d.weekday()]} {d:%d/%m}"
+                cuando = ("cada uno en cuanto termina" if horas and horas[0] == "al terminar"
+                          else " · ".join(horas))
+                lineas.append(f"  {nombre}: {len(horas)} → {cuando}")
+            await update.message.reply_text(
+                f"📅 Publicación en TikTok ({canal.nombre(PERFIL)}): {n} videos en {dias} días\n"
+                + "\n".join(lineas) + "\n"
+                "Los de hoy se publican en cuanto sale cada video; los demás se suben a Zernio al "
+                "generarse y salen a su hora (hora de México). Si un lugar llega antes que su "
+                "video, se recorre al final.")
+        except Exception as e:  # noqa: BLE001
+            logger.exception("calendario de Zernio para %s", lote)
+            await update.message.reply_text(
+                f"⚠️ La fábrica sí arrancó, pero no pude armar el calendario de TikTok: {e}\n"
+                f"A mano: python tools\\programar_zernio.py --canal {PERFIL or 'datomatagato'} "
+                f"--videos {n} --dias {dias} --lote {lote} --confirmar")
+
+    asyncio.get_running_loop().create_task(tarea())
+
+
 async def _lotegrande_automatico(update: Update, n: int, horario: str, tema: str | None,
-                                 formato: str = "cercania") -> None:
+                                 formato: str = "cercania", dias: int | None = None) -> None:
     """/lotegrande 20 dia [tema] o /lotegrande 20 0-9 [tema]: crea una fábrica
     que escribe Y genera sola (3 temas de conversación : 2 perennes),
     se reanuda tras el límite de Claude y archiva sin publicar."""
@@ -1437,7 +1515,7 @@ async def _lotegrande_automatico(update: Update, n: int, horario: str, tema: str
     if not _authorized(update.effective_chat.id):
         await _reject_unauthorized(update)
         return
-    activas = _fabricas_activas()
+    activas = _fabricas_mias()
     if activas:
         await update.message.reply_text(_aviso_ocupada(activas))
         return
@@ -1449,6 +1527,9 @@ async def _lotegrande_automatico(update: Update, n: int, horario: str, tema: str
     subprocess.Popen([str(pyw if pyw.exists() else sys.executable), str(_FABRICA_CLI), "ciclo", lote],
                      cwd=str(_FABRICA_CLI.parents[1]),
                      creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "DETACHED_PROCESS", 0))
+    if dias:
+        _lanzar_publicacion(update, lote, n, dias)
+    destino = f"y se sube a TikTok (Zernio) en {dias} días" if dias else "sin publicar"
     if formato == "todos":
         orden = fabrica.repartir_todos(n, fabrica.conteo_formatos())
         conteo: dict[str, int] = {}
@@ -1464,7 +1545,7 @@ async def _lotegrande_automatico(update: Update, n: int, horario: str, tema: str
             "• La serie sale una parte por turno, en orden: publícalas en ese orden.\n"
             f"• De 2 en 2. Claude escribe {'todo el día' if not horario else f'solo de {horario} h'}, hasta "
             f"{_VIDEOS_POR_VENTANA} guiones por ventana de 5 h. Generar todo toma ~{n * 45 / 60:.0f} h; "
-            f"se archiva en {estado['carpeta_videos']} sin publicar.\n"
+            f"se archiva en {estado['carpeta_videos']} {destino}.\n"
             "Estado: /fabrica · Detener: /pararfabrica")
         return
     if formato == "redes":
@@ -1478,7 +1559,7 @@ async def _lotegrande_automatico(update: Update, n: int, horario: str, tema: str
             f"Claude escribe {'todo el día' if not horario else f'solo de {horario} h'}, hasta "
             f"{_VIDEOS_POR_VENTANA} guiones por ventana de 5 h.\n"
             f"• Generar todo toma ~{n * 45 / 60:.0f} h. Cada video te llega aquí al terminar; se "
-            f"archiva en {estado['carpeta_videos']} sin publicar.\n"
+            f"archiva en {estado['carpeta_videos']} {destino}.\n"
             "Estado: /fabrica · Detener: /pararfabrica")
         return
     if formato == "tradiciones":
@@ -1487,7 +1568,7 @@ async def _lotegrande_automatico(update: Update, n: int, horario: str, tema: str
             f"{f['titulo']}: fábrica {lote} en marcha, {n} videos.\n" + "\n".join(f["lineas"]) + "\n"
             f"• De 2 en 2. Claude escribe {'todo el día' if not horario else f'solo de {horario} h'}, hasta "
             f"{_VIDEOS_POR_VENTANA} guiones por ventana de 5 h. Cada video te llega aquí y se archiva en "
-            f"{estado['carpeta_videos']} sin publicar.\n"
+            f"{estado['carpeta_videos']} {destino}.\n"
             "Estado: /fabrica · Detener: /pararfabrica")
         return
     temas = {c: nombre for c, nombre, _ in instruccion_cercania.TEMAS}
@@ -1503,7 +1584,7 @@ async def _lotegrande_automatico(update: Update, n: int, horario: str, tema: str
         f"{_VIDEOS_POR_VENTANA} guiones por ventana de 5 h.\n"
         f"• Si se acaba la cuota, sigue generando lo escrito y retoma sola.\n"
         f"• Generar todo toma ~{horas:.0f} h. Cada video te llega aquí al terminar; se archiva en "
-        f"{estado['carpeta_videos']} sin publicar.\n"
+        f"{estado['carpeta_videos']} {destino}.\n"
         "Estado: /fabrica · Detener: /pararfabrica")
 
 
@@ -1845,6 +1926,25 @@ class LimiteDeClaude(Exception):
     intento falla en dos segundos hasta la hora que dice el mensaje."""
 
 
+class ClaudeDesactualizado(LimiteDeClaude):
+    """El CLI de Claude quedó viejo para el modelo (19/11/2026). Hereda de
+    LimiteDeClaude para que todo lo que ya guarda lo escrito y deja de pedir
+    lo maneje igual; la fábrica lo distingue para avisar con el arreglo
+    (`claude update`) en vez de decir "esperando la cuota"."""
+
+
+def error_que_para(texto: str) -> LimiteDeClaude | None:
+    """La excepción que corresponde a un error de Claude que no se arregla
+    reintentando, o None si vale la pena seguir."""
+    from dato_mata_gato_bot.claude_runner import es_cli_desactualizado
+
+    if es_cli_desactualizado(texto):
+        return ClaudeDesactualizado(texto)
+    if es_limite_de_uso(texto):
+        return LimiteDeClaude(texto)
+    return None
+
+
 def _sesion_nueva() -> tuple[str, bool]:
     """Una conversación nueva con Claude, para trabajo que no necesita memoria.
 
@@ -1923,8 +2023,8 @@ async def _guiones_de_crimen(
     result = await asyncio.to_thread(run_turn, session_id, instruccion, is_new, False, _sesion_recortada())
     if not result.ok:
         logger.error("Tramo %s falló: %s", desc, result.text[:2000])
-        if es_limite_de_uso(result.text):
-            raise LimiteDeClaude(result.text)
+        if (exc := error_que_para(result.text)):
+            raise exc
         await update.message.reply_text(f"Falló el tramo {desc}: {result.text}")
         return []
     guiones = _parse_lote_response(result.text)
@@ -1980,8 +2080,8 @@ async def _revisar_guiones_crimen(update: Update, session_id: str, guiones: list
         corregidos = _parse_lote_response(result.text)
         if corregidos:
             guiones = corregidos
-    elif es_limite_de_uso(result.text):
-        raise LimiteDeClaude(result.text)
+    elif (exc := error_que_para(result.text)):
+        raise exc
     buenos, fuera = [], {}
     for g in guiones:
         p = _problemas_de(g.get("slug", ""))

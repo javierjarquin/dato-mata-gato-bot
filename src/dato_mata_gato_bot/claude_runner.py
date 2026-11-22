@@ -144,6 +144,26 @@ def es_limite_de_uso(texto: str) -> bool:
     return "limit" in t and ("hit your" in t or "resets" in t or "usage" in t)
 
 
+def es_cli_desactualizado(texto: str) -> bool:
+    """¿El error es que el CLI de Claude quedó viejo para el modelo? (19/11/2026)
+
+    El 18/11 la API empezó a pedir Claude Code ≥ 2.1.280 y el bot tenía la
+    2.1.220: "API Error: 400 Claude Code 2.1.220 does not support this model;
+    version 2.1.280 or newer is required. Run 'claude update'". La fábrica lo
+    tomó por cuota agotada y se quedó días en 8/15 sin decir la causa. Igual
+    que con la cuota, reintentar no sirve, pero aquí esperar tampoco: hay que
+    actualizar el CLI."""
+    t = (texto or "").lower()
+    return ("does not support this model" in t
+            or ("or newer is required" in t and "version" in t)
+            or "run 'claude update'" in t)
+
+
+def hay_que_parar(texto: str) -> bool:
+    """Errores en los que seguir pidiendo guiones solo repite el fallo."""
+    return es_limite_de_uso(texto) or es_cli_desactualizado(texto)
+
+
 def tamano_sesion(session_id: str) -> int:
     """Bytes del historial guardado de una sesión (0 si no existe).
 

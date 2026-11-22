@@ -36,7 +36,7 @@ from pathlib import Path
 
 import requests
 
-from dato_mata_gato_bot import canal, expediente, formatos, lote_grande, pipeline
+from dato_mata_gato_bot import canal, claude_runner, expediente, formatos, lote_grande, pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -343,6 +343,83 @@ def _latir(lote: str, parar: threading.Event) -> None:
                                       encoding="utf-8")
 
 
+# ------------------------------------------------------------ turno de la máquina
+# Dos lotes a la vez, uno por canal (22/11/2026, Javier: "/lotegrande 10 3 y
+# /papasia 10 3 juntos, 3 de cada uno cada día, no encolado"). La voz
+# (VoiceStudio) y el render son uno solo, así que cada video toma la máquina
+# entera; los guiones sí se escriben en paralelo. Se turnan: quien acaba de
+# usarla la cede si el otro lote está esperando. Archivos en la fábrica del
+# canal base, que ven los dos.
+
+ESPERA_MAQUINA = 10      # cada cuánto pregunta quien espera turno
+ESPERA_FRESCA = 90       # una espera más vieja que esto es de un ciclo que ya no está
+
+
+def _dir_maquina() -> Path:
+    return canal.raiz_fabrica("")
+
+
+def _leer_json(ruta: Path) -> dict:
+    try:
+        return json.loads(ruta.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _otro_esperando(lote: str) -> bool:
+    for ruta in _dir_maquina().glob("espera-*.json"):
+        d = _leer_json(ruta)
+        if (d.get("lote") and d["lote"] != lote and time.time() - d.get("t", 0) < ESPERA_FRESCA
+                and _proceso_vivo(int(d.get("pid", 0)))):
+            return True
+    return False
+
+
+def _maquina_ocupada() -> bool:
+    ruta = _dir_maquina() / "maquina.json"
+    d = _leer_json(ruta)
+    if not ruta.exists():
+        return False
+    if d.get("pid") and _proceso_vivo(int(d["pid"])) and time.time() - d.get("t", 0) < TIMEOUT_VIDEO + 600:
+        return True
+    ruta.unlink(missing_ok=True)  # quien la tenía ya murió
+    return False
+
+
+def tomar_maquina(lote: str, rendirse=lambda: False) -> bool:
+    """Espera el turno de la máquina para hacer UN video. False si `rendirse()`
+    (p. ej. entró un /pararfabrica mientras esperaba)."""
+    _dir_maquina().mkdir(parents=True, exist_ok=True)
+    espera = _dir_maquina() / f"espera-{lote}.json"
+    try:
+        while True:
+            if rendirse():
+                return False
+            espera.write_text(json.dumps({"lote": lote, "pid": os.getpid(), "t": time.time()}),
+                              encoding="utf-8")
+            ultimo = _leer_json(_dir_maquina() / "maquina_ultimo.json").get("lote")
+            if not _maquina_ocupada() and not (ultimo == lote and _otro_esperando(lote)):
+                try:
+                    fd = os.open(_dir_maquina() / "maquina.json", os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                except FileExistsError:
+                    pass
+                else:
+                    os.write(fd, json.dumps({"lote": lote, "pid": os.getpid(), "t": time.time()}).encode())
+                    os.close(fd)
+                    return True
+            time.sleep(ESPERA_MAQUINA)
+    finally:
+        espera.unlink(missing_ok=True)
+
+
+def soltar_maquina(lote: str) -> None:
+    (_dir_maquina() / "maquina_ultimo.json").write_text(json.dumps({"lote": lote, "t": time.time()}),
+                                                         encoding="utf-8")
+    ruta = _dir_maquina() / "maquina.json"
+    if _leer_json(ruta).get("pid") == os.getpid():
+        ruta.unlink(missing_ok=True)
+
+
 # ---------------------------------------------------------------------- trabajo
 
 # La fórmula de Javier (12/10/2026), "la contradicción local": te afecta (autorreferencia)
@@ -518,7 +595,7 @@ async def _escribir_y_rescatar(avisador, nombre: str, texto: str, cantidad: int,
     Si se acaba la cuota, LimiteDeClaude lleva en `.slugs` lo que sí pasó.
     Devuelve (guiones buenos, sesiones usadas)."""
     from dato_mata_gato_bot import bot
-    from dato_mata_gato_bot.claude_runner import es_limite_de_uso, run_turn
+    from dato_mata_gato_bot.claude_runner import run_turn
 
     session_id, _ = bot._sesion_nueva()
     desde = time.time() - 5
@@ -534,8 +611,7 @@ async def _escribir_y_rescatar(avisador, nombre: str, texto: str, cantidad: int,
         revision = {s: revisar(s) for s in slugs}
         buenos = [s for s, p in revision.items() if not p]
         fallas = {s: p for s, p in revision.items() if p}
-        if not r.ok and es_limite_de_uso(r.text):
-            exc = bot.LimiteDeClaude(r.text)
+        if not r.ok and (exc := bot.error_que_para(r.text)):
             exc.slugs = buenos
             raise exc
         sin_tema = cantidad - len(buenos) - len(fallas)
@@ -697,11 +773,36 @@ def problemas_tradiciones(slug: str) -> list[str]:
 async def _guiones_tradiciones(avisador, tema: str | None, cantidad: int,
                                ligera: bool | None = None) -> tuple[list[dict], list[str]]:
     """Un lote del nicho "el porqué de las tradiciones": las IA gratis escogen el
-    tema y leen las fuentes; Claude escribe el texto y las escenas 3D."""
-    from dato_mata_gato_bot import bot, expediente_tradiciones, instruccion_tradiciones
+    tema y leen las fuentes; Claude escribe el texto y las escenas 3D.
+
+    Desde el 22/11/2026 en un turno de Claude por guion (`tradiciones_guion`),
+    como papasia. TRADICIONES_UN_TURNO=0, o un expediente sin temas, lo regresan
+    a la sesión con herramientas de antes."""
+    import httpx
+
+    from dato_mata_gato_bot import (bot, expediente_tradiciones, ia_gratis, instruccion_tradiciones,
+                                    tradiciones_guion)
 
     ligera = sesion_ligera() if ligera is None else ligera
     ya = bot._ya_cubiertos("guion-tradicion-")
+    if tradiciones_guion.un_turno() and expediente.activo():
+        try:
+            hechos, limite = await asyncio.to_thread(
+                tradiciones_guion.lote, tema, cantidad, ya, tokens_de_sesiones, telegram)
+        except expediente.SinCuotaGratis:
+            raise  # la fábrica pregunta si sigue Claude o espera (27/10/2026)
+        except (ia_gratis.SinIA, httpx.HTTPError, ValueError, KeyError) as exc:
+            logger.warning("tradiciones: sin expediente de un turno (%s); escribe la sesión con herramientas", exc)
+        else:
+            await avisador.message.reply_text(
+                "🧾 Tradiciones, gasto de Claude por guion:\n"
+                + "\n".join(tradiciones_guion.renglon(g) for g in hechos))
+            buenos = [{"slug": g.slug, "vigencia": "perenne"} for g in hechos if g.paso]
+            if limite:
+                exc = bot.error_que_para(limite) or bot.LimiteDeClaude(limite)
+                exc.slugs = [g["slug"] for g in buenos]
+                raise exc
+            return buenos, [g.sesion for g in hechos]
     texto = instruccion_tradiciones.instruccion(cantidad, tema, ya, ligera=ligera)
     texto = await asyncio.to_thread(expediente_tradiciones.agregar, texto, tema, cantidad, ya, telegram)
     buenos, sesiones = await _escribir_y_rescatar(
@@ -733,14 +834,15 @@ async def _guiones_papasia(avisador, tema: str | None, cantidad: int,
     IA gratis sin cuota, lo regresan a la sesión con herramientas de antes."""
     import httpx
 
-    from dato_mata_gato_bot import bot, ia_gratis, instruccion_papasia, papasia_guion
+    from dato_mata_gato_bot import bot, claude_runner, ia_gratis, instruccion_papasia, papasia_guion
 
     ligera = sesion_ligera() if ligera is None else ligera
     ya = bot._ya_cubiertos("guion-papasia-")
     if (os.getenv("PAPASIA_UN_TURNO") or "1").strip() != "0":
         try:
             hechos, limite = await asyncio.to_thread(
-                papasia_guion.lote, tema, cantidad, ya, tokens_de_sesiones, telegram)
+                papasia_guion.lote, tema, cantidad, ya, tokens_de_sesiones, telegram,
+                claude_runner.hay_que_parar)
         except (ia_gratis.SinIA, httpx.HTTPError) as exc:
             logger.warning("papasia: sin expediente (%s); escribe la sesión con herramientas", exc)
             telegram(f"🔎 papasia: no pude armar el expediente sin Claude ({str(exc)[:120]}); "
@@ -751,7 +853,7 @@ async def _guiones_papasia(avisador, tema: str | None, cantidad: int,
                 + "\n".join(papasia_guion.renglon(g) for g in hechos))
             buenos = [{"slug": g.slug, "vigencia": "perenne"} for g in hechos if g.paso]
             if limite:
-                exc = bot.LimiteDeClaude(limite)
+                exc = bot.error_que_para(limite) or bot.LimiteDeClaude(limite)
                 exc.slugs = [g["slug"] for g in buenos]
                 raise exc
             return buenos, [g.sesion for g in hechos]
@@ -1338,7 +1440,8 @@ def video(lote: str, slug: str) -> None:
         pegada = pipeline.variante_portada(slug)
         telegram_fotos([(proyecto / f"portada_{v}.jpg",
                          "Portada"
-                         + (" (ya va en el primer cuadro)" if v == pegada else "")) for v in ("nota", "dato", "gancho")])
+                         + (" (ya va en el primer cuadro)" if v == pegada else ""))
+                        for v in ("nota", "dato", "gancho", "papasia")])
         limpiar(slug, liviano)
     print("RESULTADO " + json.dumps({"ok": r.ok, "mensaje": r.mensaje[-1500:]}, ensure_ascii=False),
           flush=True)
@@ -1358,21 +1461,42 @@ def ciclo(lote: str) -> str:
         _ruta_latido(lote).unlink(missing_ok=True)
 
 
+_PROGRAMAR_ZERNIO = Path(__file__).resolve().parents[2] / "tools" / "programar_zernio.py"
+
+
+def subir_a_zernio() -> None:
+    """Si el canal tiene calendario de Zernio, el video recién hecho se sube YA
+    (22/11/2026, Javier: los del día del comando salen "apenas termine el
+    video"), sin esperar la vuelta de 15 min del vigilante. Corre aparte, para
+    no frenar el siguiente video; si alguien más está subiendo, espera turno."""
+    if not (canal.entrada() / "zernio_calendario.json").exists():
+        return
+    py = Path(sys.executable).with_name("python.exe")
+    try:
+        subprocess.Popen([str(py if py.exists() else sys.executable), str(_PROGRAMAR_ZERNIO),
+                          "--canal", canal.actual() or "datomatagato", "--confirmar", "--esperar"],
+                         cwd=str(_PROGRAMAR_ZERNIO.parents[1]), stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, creationflags=_SIN_VENTANA)
+    except OSError:
+        logger.exception("no pude lanzar programar_zernio")
+
+
+def _avisar_pausa(lote: str, estado: dict, problema: str) -> str:
+    if time.time() - estado["ultimo_aviso_infra"] > AVISO_INFRA_CADA:
+        telegram(f"⚠️ Fábrica {lote} en pausa: {problema}\nLo reintento cada 15 minutos.")
+        estado["ultimo_aviso_infra"] = time.time()
+        guardar(lote, estado)
+    return problema
+
+
 def _ciclo(lote: str) -> str:
     while True:
         estado = leer(lote)
         if estado["terminado"]:
             return "terminado"
-        problema = asegurar_infra()
-        if not problema and disco_libre_gb() < DISCO_MINIMO_GB:
-            problema = (f"quedan {disco_libre_gb():.0f} GB libres en el disco (mínimo "
-                        f"{DISCO_MINIMO_GB}). Libera espacio o mueve videos ya publicados.")
-        if problema:
-            if time.time() - estado["ultimo_aviso_infra"] > AVISO_INFRA_CADA:
-                telegram(f"⚠️ Fábrica {lote} en pausa: {problema}\nLo reintento cada 15 minutos.")
-                estado["ultimo_aviso_infra"] = time.time()
-                guardar(lote, estado)
-            return problema
+        if disco_libre_gb() < DISCO_MINIMO_GB:
+            return _avisar_pausa(lote, estado, f"quedan {disco_libre_gb():.0f} GB libres en el disco "
+                                 f"(mínimo {DISCO_MINIMO_GB}). Libera espacio o mueve videos ya publicados.")
 
         fila = pendientes(estado)
         cuota_libre = (estado["cuota_libre_desde"] is None
@@ -1389,7 +1513,21 @@ def _ciclo(lote: str) -> str:
                  "pedidos": estado["guiones_pedidos"] - antes, **gasto,
                  **({"cortada": True} if limite else {})})
             estado["cuota_libre_desde"] = None
-            if limite:
+            estado["claude_desactualizado"] = bool(limite and claude_runner.es_cli_desactualizado(limite))
+            if estado["claude_desactualizado"]:
+                # No es la cuota (19/11/2026): esperar no lo arregla. Se reintenta
+                # cada ESPERA_CUOTA por si ya se actualizó, y se avisa una vez por
+                # hora con el arreglo, no "retomo a las HH:MM".
+                libre = datetime.now() + timedelta(seconds=ESPERA_CUOTA)
+                estado["cuota_libre_desde"] = libre.isoformat(timespec="minutes")
+                if time.time() - estado.get("ultimo_aviso_cli", 0) > AVISO_INFRA_CADA:
+                    estado["ultimo_aviso_cli"] = time.time()
+                    telegram(f"🛠️ Fábrica {lote}: el CLI de Claude quedó viejo para el modelo y no "
+                             f"puede escribir guiones:\n{limite[-300:]}\n"
+                             "Arreglo: en una terminal, `claude update` (y que el PATH apunte a "
+                             r"C:\Users\jarqu\.local\bin). Sigo renderizando lo que hay y reintento "
+                             f"cada {ESPERA_CUOTA // 60} min.")
+            elif limite:
                 libre = hora_de_reset(limite, datetime.now())
                 estado["cuota_libre_desde"] = libre.isoformat(timespec="minutes")
                 telegram(f"⏸️ Fábrica {lote}: se acabó la cuota de Claude. Sigo renderizando "
@@ -1417,18 +1555,32 @@ def _ciclo(lote: str) -> str:
                 guardar(lote, estado)
                 telegram(f"✅ Fábrica {lote} terminada.\n{resumen(estado)}")
                 return "terminado"
+            if estado.get("claude_desactualizado"):
+                return "el CLI de Claude está desactualizado (claude update)"
             return freno or "esperando la cuota de Claude para escribir más guiones"
 
         slug = fila[0]
         if detenida(lote):  # pudo entrar el /pararfabrica mientras se escribía
             return "detenida"
-        ok, mensaje = _correr_video(lote, slug)
+        # Un video a la vez en la máquina, turnándose con el lote del otro canal.
+        # Docker y VoiceStudio se revisan ya con el turno: antes de tenerlo, el
+        # otro lote puede estar usando la voz y tardar en contestar.
+        if not tomar_maquina(lote, lambda: detenida(lote)):
+            return "detenida"
+        try:
+            if problema := asegurar_infra():
+                return _avisar_pausa(lote, leer(lote), problema)
+            ok, mensaje = _correr_video(lote, slug)
+        finally:
+            soltar_maquina(lote)
         estado = leer(lote)
         v = estado["videos"][slug]
         v["intentos"] += 1
         v["estado"] = "listo" if ok else "fallido"
         v["error"] = "" if ok else mensaje[-500:]
         guardar(lote, estado)
+        if ok:
+            subir_a_zernio()
         if not ok:
             otra = "lo reintento al final de la fila" if v["intentos"] < MAX_INTENTOS else "queda fuera"
             telegram(f"⚠️ {slug} falló ({otra}):\n{mensaje[-500:]}")

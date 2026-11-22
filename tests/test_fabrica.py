@@ -77,6 +77,39 @@ def test_sin_cuota_sigue_renderizando_y_guarda_lo_ya_escrito(fab, monkeypatch):
     assert motivo == "esperando la cuota de Claude para escribir más guiones"
 
 
+VERSION_VIEJA = ("Error ejecutando Claude: API Error: 400 Claude Code 2.1.220 does not support this "
+                 "model; version 2.1.280 or newer is required. Run 'claude update', or update the")
+
+
+def test_cli_viejo_no_se_confunde_con_la_cuota(fab, monkeypatch):
+    """18/11/2026: la fábrica dijo "esperando la cuota" durante días por un CLI viejo."""
+    from dato_mata_gato_bot import claude_runner
+
+    assert claude_runner.es_cli_desactualizado(VERSION_VIEJA)
+    assert not claude_runner.es_limite_de_uso(VERSION_VIEJA)
+    assert not claude_runner.es_cli_desactualizado("You've hit your session limit · resets 3:40pm")
+    avisos = []
+    monkeypatch.setattr(fabrica, "telegram", lambda texto, *a, **k: avisos.append(texto))
+    fabrica.crear("t", 10)
+    _escritor(monkeypatch, [(["guion-a"], VERSION_VIEJA)])
+    monkeypatch.setattr(fabrica, "_correr_video", lambda lote, slug: (True, "ok"))
+    motivo = fabrica.ciclo("t")
+    estado = fabrica.leer("t")
+    assert estado["videos"]["guion-a"]["estado"] == "listo"
+    assert motivo == "el CLI de Claude está desactualizado (claude update)"
+    assert any("claude update" in a for a in avisos)
+    assert not any("se acabó la cuota" in a for a in avisos)
+
+
+def test_error_que_para_distingue_version_y_cuota():
+    from dato_mata_gato_bot import bot
+
+    assert isinstance(bot.error_que_para(VERSION_VIEJA), bot.ClaudeDesactualizado)
+    cuota = bot.error_que_para("You've hit your session limit · resets 3:40pm")
+    assert type(cuota) is bot.LimiteDeClaude
+    assert bot.error_que_para("se cortó la conexión") is None
+
+
 def test_un_corte_a_mitad_se_retoma_desde_el_estado(fab, monkeypatch):
     fabrica.crear("t", 2)
     _escritor(monkeypatch, [(["guion-a", "guion-b"], None)])
