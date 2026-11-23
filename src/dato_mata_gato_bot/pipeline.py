@@ -1289,6 +1289,19 @@ def _stage_guion_for_tts(slug: str, avatar: bool = False) -> None:
                                          encoding="utf-8")
 
 
+def _musica(slug: str, final: Path) -> str:
+    """Una de las 5 pistas propias del canal, rotando (musica.py). Si falla, el
+    video sigue sin música."""
+    from dato_mata_gato_bot import musica
+
+    try:
+        guion = json.loads((ANDROID_IN / slug / "guion.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        guion = {}
+    return musica.poner(guion if isinstance(guion, dict) else {},
+                        "papasia" if formato_3d(slug) == "papasia" else "", final)
+
+
 def _archivar_local(slug: str, final_mp4: Path, carpeta: Path) -> Path:
     """Copia el video a `carpeta` con el NOMBRE CORTO del caso.
 
@@ -1381,7 +1394,9 @@ def run_3d(slug: str, progreso, destino_local: Path | None = None) -> PipelineRe
     tiempos = [ln for ln in proc.stdout.splitlines() if ln.startswith(("voz lista", "render:"))]
     progreso("portada")
     notas = "\n".join([f"render: 3D de {formato} (" + "; ".join(tiempos) + ")",
-                       revision.resumen_visual(guion), _portadas(slug, final)])
+                       revision.resumen_visual(guion), _portadas(slug, final),
+                       # Después de la portada: pegarla recodifica el audio.
+                       _musica(slug, final)])
     if destino_local is None:
         return PipelineResult(True, f"Video listo: {final}\n{notas}")
     progreso("archivando el video")
@@ -1563,6 +1578,11 @@ def run(slug: str, voz: str, chat_id: int | None = None,
                 f"presentador:\n{exc}",
                 necesita_claude=True,
             )
+
+    # Música de fondo (22/11/2026): al final, cuando el video ya tiene portada
+    # y presentador, para que nada la recodifique ni se la quite.
+    if nota_musica := _musica(slug, final_mp4):
+        aviso_evidencia = "\n".join(x for x in (aviso_evidencia, nota_musica) if x)
 
     if destino_local is not None:
         # Modo lote grande: el video se archiva en disco y NO se sube ni se le
