@@ -19,6 +19,8 @@ def _turno_de_maquina_aparte(monkeypatch, tmp_path):
     monkeypatch.setattr(fabrica, "_dir_maquina", lambda: tmp_path / "_maquina")
     # Ni subir a Zernio de verdad al terminar un video de prueba.
     monkeypatch.setattr(fabrica, "subir_a_zernio", lambda: None)
+    # Ni mezclar música real (ni mover el turno de las pistas de verdad).
+    monkeypatch.setenv("MUSICA", "0")
 
 
 @pytest.fixture(autouse=True)
